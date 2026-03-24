@@ -2,6 +2,7 @@
 
 mod events;
 mod types;
+mod validation;
 
 pub use types::{
     Incentive, Material, ParticipantRole, RecyclingStats, TransferItemType, TransferRecord, TransferStatus,
@@ -79,23 +80,6 @@ impl ScavengerContract {
         caller.require_auth();
     }
 
-    /// Reentrancy guard lock.
-    fn lock(env: &Env) {
-        let is_locked: bool = env
-            .storage()
-            .instance()
-            .get(&REENTRANCY_GUARD)
-            .unwrap_or(false);
-        if is_locked {
-            panic!("Reentrancy guard: locked");
-        }
-        env.storage().instance().set(&REENTRANCY_GUARD, &true);
-    }
-
-    /// Reentrancy guard unlock.
-    fn unlock(env: &Env) {
-        env.storage().instance().set(&REENTRANCY_GUARD, &false);
-    }
 
     // ========== Access Control Helper Functions ==========
 

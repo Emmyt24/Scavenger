@@ -23,12 +23,12 @@ fn setup_test_environment(env: &Env) -> (ScavengerContractClient, Address) {
     let (client, admin, token_address, charity_address) = create_test_contract(env);
     
     // Initialize contract
-    client.__constructor(env, admin.clone(), token_address, charity_address, 30, 20);
+    client.initialize(&admin, &token_address, &charity_address, &30, &20);
     
     // Register recycler participant
     let recycler = Address::generate(env);
     let name = String::from_str(env, "Test Recycler");
-    client.register_participant(env, &recycler, &Role::Recycler, &name, 100, 200);
+    client.register_participant(&recycler, &Role::Recycler, &name, &100, &200);
     
     (client, recycler)
 }
@@ -44,7 +44,7 @@ fn test_successful_waste_registration() {
     let weight: u64 = 5000;
     
     // Register waste
-    let material = client.submit_material(&env, &recycler, waste_type, weight);
+    let material = client.submit_material(&recycler, &waste_type, &weight);
     
     // Verify waste was created successfully
     assert_eq!(material.waste_type, waste_type);

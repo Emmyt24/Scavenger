@@ -10,7 +10,9 @@ mod test_reset_waste_confirmation;
 mod test_incentive_events;
 mod testutils;
 mod test_participant_registration_flow;
+mod test_waste_registration_flow;
 mod test_data_structures;
+mod test_metrics;
 mod events;
 mod types;
 
