@@ -154,6 +154,21 @@ impl ScavengerContract {
         }
     }
 
+    // ========== Reentrancy Guard Helper Functions ==========
+
+    /// Lock the reentrancy guard
+    fn lock(env: &Env) {
+        if env.storage().instance().has(&REENTRANCY_GUARD) {
+            panic!("Reentrant call detected");
+        }
+        env.storage().instance().set(&REENTRANCY_GUARD, &true);
+    }
+
+    /// Unlock the reentrancy guard
+    fn unlock(env: &Env) {
+        env.storage().instance().remove(&REENTRANCY_GUARD);
+    }
+
     // ========== Charity Contract Functions ==========
 
     /// Set the charity contract address (admin only)
@@ -1236,6 +1251,128 @@ impl ScavengerContract {
         );
 
         transfer
+    }
+
+    /// Batch transfer multiple waste items to a single recipient
+    /// All waste IDs are validated before any transfer is executed (atomic validation)
+    /// Emits individual transfer events for each waste item
+    pub fn batch_transfer_waste(
+        env: Env,
+        waste_ids: Vec<u128>,
+        to: Address,
+        latitude: i128,
+        longitude: i128,
+    ) -> Vec<WasteTransfer> {
+        // Validate recipient is registered
+        Self::require_registered(&env, &to);
+
+        // Handle empty batch
+        if waste_ids.is_empty() {
+            return Vec::new(&env);
+        }
+
+        // Phase 1: Validate all waste IDs before executing any transfer
+        let mut wastes_to_transfer: soroban_sdk::Vec<(u128, types::Waste, Address)> = soroban_sdk::Vec::new(&env);
+        
+        for waste_id in waste_ids.iter() {
+            let waste: types::Waste = env
+                .storage()
+                .instance()
+                .get(&("waste_v2", waste_id))
+                .expect("Waste item not found");
+
+            // Verify waste is active
+            if !waste.is_active {
+                panic!("Cannot transfer deactivated waste");
+            }
+
+            // Get the current owner
+            let from = waste.current_owner.clone();
+            
+            // Verify caller owns the waste
+            Self::only_waste_owner(&env, &from, waste_id);
+            Self::require_registered(&env, &from);
+
+            // Validate transfer route
+            if !Self::is_valid_transfer(env.clone(), from.clone(), to.clone()) {
+                panic!("Invalid transfer");
+            }
+
+            wastes_to_transfer.push_back((waste_id, waste, from));
+        }
+
+        // Phase 2: Execute all transfers (all validations passed)
+        let mut transfers: Vec<WasteTransfer> = Vec::new(&env);
+        let timestamp = env.ledger().timestamp();
+
+        for item in wastes_to_transfer.iter() {
+            let (waste_id, mut waste, from) = item;
+
+            // Update waste ownership
+            waste.transfer_to(to.clone());
+            env.storage()
+                .instance()
+                .set(&("waste_v2", waste_id), &waste);
+
+            // Update from participant's waste list
+            let from_list: Vec<u128> = env
+                .storage()
+                .instance()
+                .get(&("participant_wastes", from.clone()))
+                .unwrap_or(Vec::new(&env));
+            let mut new_from_list = Vec::new(&env);
+            for id in from_list.iter() {
+                if id != waste_id {
+                    new_from_list.push_back(id);
+                }
+            }
+            env.storage()
+                .instance()
+                .set(&("participant_wastes", from.clone()), &new_from_list);
+
+            // Update to participant's waste list
+            let mut to_list: Vec<u128> = env
+                .storage()
+                .instance()
+                .get(&("participant_wastes", to.clone()))
+                .unwrap_or(Vec::new(&env));
+            to_list.push_back(waste_id);
+            env.storage()
+                .instance()
+                .set(&("participant_wastes", to.clone()), &to_list);
+
+            // Create transfer record
+            let transfer = WasteTransfer::new(
+                waste_id,
+                from.clone(),
+                to.clone(),
+                timestamp,
+                latitude,
+                longitude,
+                soroban_sdk::symbol_short!("transfer"),
+            );
+
+            // Update transfer history
+            let mut history: Vec<WasteTransfer> = env
+                .storage()
+                .instance()
+                .get(&("transfer_history", waste_id))
+                .unwrap_or(Vec::new(&env));
+            history.push_back(transfer.clone());
+            env.storage()
+                .instance()
+                .set(&("transfer_history", waste_id), &history);
+
+            // Emit individual transfer event
+            env.events().publish(
+                (soroban_sdk::symbol_short!("transfer"), waste_id),
+                (from, to.clone(), timestamp),
+            );
+
+            transfers.push_back(transfer);
+        }
+
+        transfers
     }
 
     /// Transfer aggregated waste from collector to manufacturer
