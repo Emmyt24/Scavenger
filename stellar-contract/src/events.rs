@@ -103,3 +103,11 @@ pub fn emit_participant_location_updated(
         (latitude, longitude),
     );
 }
+
+pub fn emit_contract_paused(env: &Env, admin: &Address) {
+    env.events().publish((symbol_short!("paused"),), admin);
+}
+
+pub fn emit_contract_unpaused(env: &Env, admin: &Address) {
+    env.events().publish((symbol_short!("unpaused"),), admin);
+}

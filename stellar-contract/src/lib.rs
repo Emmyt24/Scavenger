@@ -23,6 +23,7 @@ const TOTAL_WEIGHT: Symbol = symbol_short!("TOT_WGT");
 const TOTAL_TOKENS: Symbol = symbol_short!("TOT_TKN");
 const REENTRANCY_GUARD: Symbol = symbol_short!("RE_GUARD");
 const TOKEN_ADDR: Symbol = symbol_short!("TKN_ADDR");
+const PAUSED: Symbol = symbol_short!("PAUSED");
 
 /// Reward distribution percentages stored as a single instance-storage entry.
 ///
@@ -534,6 +535,7 @@ impl ScavengerContract {
         latitude: i128,
         longitude: i128,
     ) -> Participant {
+        Self::require_not_paused(&env);
         address.require_auth();
 
         // Validate coordinates
@@ -1273,6 +1275,7 @@ impl ScavengerContract {
     ) -> Material {
         from.require_auth();
 
+        Self::require_not_paused(&env);
         Self::require_registered(&env, &from);
         Self::require_registered(&env, &to);
 
@@ -1377,6 +1380,7 @@ impl ScavengerContract {
         description: String,
     ) -> Material {
         // Validate submitter is registered
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &submitter);
 
         // Get next waste ID using the new storage system
@@ -1745,6 +1749,7 @@ impl ScavengerContract {
     /// - Panics `"Owner cannot confirm own waste"`.
     /// - Panics `"Waste already confirmed"`.
     pub fn confirm_waste_details(env: Env, waste_id: u128, confirmer: Address) -> types::Waste {
+        Self::require_not_paused(&env);
         confirmer.require_auth();
         Self::require_registered(&env, &confirmer);
 
@@ -1797,6 +1802,7 @@ impl ScavengerContract {
         waste_id: u128,
         owner: Address,
     ) -> types::Waste {
+        Self::require_not_paused(&env);
         // Access control check - verify caller owns the waste
         Self::only_waste_owner(&env, &owner, waste_id);
         Self::require_registered(&env, &owner);
@@ -2242,6 +2248,7 @@ impl ScavengerContract {
         total_budget: u64,
     ) -> Incentive {
         // Access control check
+        Self::require_not_paused(&env);
         Self::only_manufacturer(&env, &rewarder);
 
         // Get next incentive ID
@@ -2349,6 +2356,7 @@ impl ScavengerContract {
     /// - Panics `"Incentive not found"`.
     /// - Panics `"Only incentive creator can deactivate"`.
     pub fn deactivate_incentive(env: Env, incentive_id: u64, rewarder: Address) -> Incentive {
+        Self::require_not_paused(&env);
         rewarder.require_auth();
         Self::require_registered(&env, &rewarder);
 
@@ -2394,6 +2402,31 @@ impl ScavengerContract {
         env.storage().instance().set(&ADMIN, &new_admin);
     }
 
+    /// Pause the contract (admin only) — blocks all state-changing functions
+    pub fn pause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        assert!(!env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is already paused");
+        env.storage().instance().set(&PAUSED, &true);
+        events::emit_contract_paused(&env, &admin);
+    }
+
+    /// Unpause the contract (admin only)
+    pub fn unpause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        assert!(env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is not paused");
+        env.storage().instance().set(&PAUSED, &false);
+        events::emit_contract_unpaused(&env, &admin);
+    }
+
+    /// Get current pause state
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        assert!(!env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is paused");
+    }
+
     // ========== Incentive-Based Reward Distribution ==========
 
     /// Distribute rewards through the supply chain for a confirmed material using an incentive.
@@ -2410,6 +2443,7 @@ impl ScavengerContract {
         let material = Self::get_waste_internal(&env, waste_id).expect("Material not found");
         assert!(material.verified, "Material must be confirmed");
 
+        Self::require_not_paused(&env);
         let mut incentive =
             Self::get_incentive_internal(&env, incentive_id).expect("Incentive not found");
         assert!(incentive.rewarder == manufacturer, "Only incentive creator can distribute rewards");
