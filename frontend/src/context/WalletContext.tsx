@@ -14,7 +14,7 @@ interface WalletContextType {
 const WalletContext = createContext<WalletContextType | undefined>(undefined);
 
 export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [address, setAddress] = useState<string | null>(null);
+  const [address, setAddress] = useState<string | null>(localStorage.getItem('wallet_address'));
   const [isInstalled, setIsInstalled] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +27,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
         setIsInstalled(true);
         if (connected) {
           const addr = await getPublicKey();
-          if (addr) setAddress(addr);
+          if (addr) { setAddress(addr); localStorage.setItem('wallet_address', addr); }
         }
       } catch {
         setIsInstalled(false);
@@ -47,6 +47,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     try {
       const addr = await requestAccess();
       setAddress(addr);
+      localStorage.setItem('wallet_address', addr);
     } catch (err: any) {
       const msg = err?.message ?? '';
       setError(msg.includes('User declined') ? 'Connection rejected.' : 'Failed to connect wallet.');
@@ -55,7 +56,7 @@ export const WalletProvider: React.FC<{ children: ReactNode }> = ({ children }) 
     }
   };
 
-  const disconnect = () => setAddress(null);
+  const disconnect = () => { setAddress(null); localStorage.removeItem('wallet_address'); };
 
   return (
     <WalletContext.Provider value={{ address, isConnected: !!address, isInstalled, connect, disconnect, isLoading: loading, error }}>
