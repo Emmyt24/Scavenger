@@ -268,6 +268,8 @@ impl ScavengerContract {
         }
     }
 
+    // ========== Reentrancy Guard Helper Functions ==========
+
     // ========== Charity Contract Functions ==========
 
     /// Set the charity contract address that receives donations.
@@ -315,6 +317,7 @@ impl ScavengerContract {
     pub fn donate_to_charity(env: Env, donor: Address, amount: i128) {
         // Reentrancy guard
         Self::lock(&env);
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &donor);
 
         // Validate amount
@@ -500,6 +503,7 @@ impl ScavengerContract {
         Self::lock(&env);
 
         rewarder.require_auth();
+        Self::require_not_paused(&env);
 
         // Validate amount
         if amount <= 0 {
@@ -965,6 +969,7 @@ impl ScavengerContract {
     /// # Errors
     /// - Panics `"Incentive not found"`.
     pub fn update_incentive_status(env: Env, incentive_id: u64, is_active: bool) -> Incentive {
+        Self::require_not_paused(&env);
         let mut incentive: Incentive =
             Self::get_incentive(&env, incentive_id).expect("Incentive not found");
 
@@ -1003,6 +1008,7 @@ impl ScavengerContract {
         new_reward_points: u64,
         new_total_budget: u64,
     ) -> Incentive {
+        Self::require_not_paused(&env);
         // Step 1: Retrieve incentive (existence check)
         let mut incentive: Incentive =
             Self::get_incentive(&env, incentive_id).expect("Incentive not found");
@@ -1240,6 +1246,7 @@ impl ScavengerContract {
     /// - Panics `"Participant not found"`.
     /// - Panics `"Participant is not registered"`.
     pub fn update_role(env: Env, address: Address, new_role: ParticipantRole) -> Participant {
+        Self::require_not_paused(&env);
         address.require_auth();
 
         let mut participant: Participant =
@@ -1270,6 +1277,7 @@ impl ScavengerContract {
     /// # Errors
     /// - Panics `"Participant not found"`.
     pub fn deregister_participant(env: Env, address: Address) -> Participant {
+        Self::require_not_paused(&env);
         address.require_auth();
 
         let key = (address.clone(),);
@@ -1310,6 +1318,7 @@ impl ScavengerContract {
         latitude: i128,
         longitude: i128,
     ) -> Participant {
+        Self::require_not_paused(&env);
         address.require_auth();
 
         validation::validate_coordinates(latitude, longitude);
@@ -1599,6 +1608,7 @@ impl ScavengerContract {
         longitude: i128,
     ) -> u128 {
         // Validate recycler is registered
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &recycler);
 
         if weight == 0 {
@@ -1690,6 +1700,12 @@ impl ScavengerContract {
         to: Address,
         latitude: i128,
         longitude: i128,
+    ) -> WasteTransfer {
+        // Access control check - verify caller owns the waste
+        Self::require_not_paused(&env);
+        Self::only_waste_owner(&env, &from, waste_id);
+        Self::require_registered(&env, &from);
+        Self::require_registered(&env, &to);
     ) -> Result<WasteTransfer, Error> {
         from.require_auth();
 
@@ -1790,6 +1806,7 @@ impl ScavengerContract {
         longitude: i128,
     ) -> Result<Vec<WasteTransfer>, Error> {
         // Validate recipient is registered
+        Self::require_not_paused(&env);
         Self::require_registered(&env, &to);
 
         // Handle empty batch
@@ -1931,6 +1948,7 @@ impl ScavengerContract {
         notes: soroban_sdk::Symbol,
     ) -> u128 {
         collector.require_auth();
+        Self::require_not_paused(&env);
         Self::require_registered(&env, &collector);
         Self::require_registered(&env, &manufacturer);
 
@@ -2181,6 +2199,7 @@ impl ScavengerContract {
         submitter: Address,
     ) -> soroban_sdk::Vec<Material> {
         // Validate submitter is registered
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &submitter);
 
         let mut results = soroban_sdk::Vec::new(&env);
@@ -2320,6 +2339,7 @@ impl ScavengerContract {
     /// - Panics `"Only recyclers can verify materials"`.
     /// - Panics `"Material not found"`.
     pub fn verify_material(env: Env, material_id: u64, verifier: Address) -> Material {
+        Self::require_not_paused(&env);
         verifier.require_auth();
 
         // Check if verifier is a recycler and is registered
@@ -2385,6 +2405,7 @@ impl ScavengerContract {
         material_ids: soroban_sdk::Vec<u64>,
         verifier: Address,
     ) -> soroban_sdk::Vec<Material> {
+        Self::require_not_paused(&env);
         verifier.require_auth();
 
         // Check if verifier is a recycler and is registered
@@ -2605,6 +2626,7 @@ impl ScavengerContract {
         material_id: u64,
         claimer: Address,
     ) -> i128 {
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &claimer);
 
         let mut incentive =
@@ -2690,6 +2712,8 @@ impl ScavengerContract {
         }
     }
 
+    // ========== Admin Transfer ==========
+
     /// Pause the contract (admin only) — blocks all state-changing functions
     pub fn pause(env: Env, admin: Address) {
         Self::require_admin(&env, &admin);
@@ -2747,6 +2771,8 @@ impl ScavengerContract {
 
         let transfers = Self::get_transfer_history(env.clone(), waste_id);
         let cfg = Self::get_reward_config(&env);
+        let collector_pct: u32 = cfg.collector_percentage;
+        let owner_pct: u32 = cfg.owner_percentage;
         let collector_pct = cfg.collector_percentage;
         let owner_pct = cfg.owner_percentage;
 

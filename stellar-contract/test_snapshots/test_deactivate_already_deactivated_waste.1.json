@@ -170,6 +170,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "participant_wastes"
@@ -1185,7 +1197,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Waste already deactivated' from contract function 'Symbol(obj#215)'"
+                  "string": "caught panic 'Waste already deactivated' from contract function 'Symbol(obj#227)'"
                 },
                 {
                   "u128": {

@@ -93,18 +93,27 @@
                       },
                       {
                         "key": {
-                          "symbol": "COL_PCT"
+                          "symbol": "RWD_CFG"
                         },
                         "val": {
-                          "u32": 30
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "OWN_PCT"
-                        },
-                        "val": {
-                          "u32": 20
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "collector_percentage"
+                              },
+                              "val": {
+                                "u32": 30
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "owner_percentage"
+                              },
+                              "val": {
+                                "u32": 20
+                              }
+                            }
+                          ]
                         }
                       }
                     ]
@@ -362,7 +371,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Caller is not the contract admin' from contract function 'Symbol(obj#27)'"
+                  "string": "caught panic 'Caller is not the contract admin' from contract function 'Symbol(obj#33)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"

@@ -94,18 +94,27 @@
                       },
                       {
                         "key": {
-                          "symbol": "COL_PCT"
+                          "symbol": "RWD_CFG"
                         },
                         "val": {
-                          "u32": 0
-                        }
-                      },
-                      {
-                        "key": {
-                          "symbol": "OWN_PCT"
-                        },
-                        "val": {
-                          "u32": 0
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "collector_percentage"
+                              },
+                              "val": {
+                                "u32": 0
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "owner_percentage"
+                              },
+                              "val": {
+                                "u32": 0
+                              }
+                            }
+                          ]
                         }
                       }
                     ]

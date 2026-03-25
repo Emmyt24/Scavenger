@@ -207,6 +207,21 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "participant_wastes"
@@ -1543,7 +1558,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Caller is not the owner of this waste item' from contract function 'Symbol(obj#321)'"
+                  "string": "caught panic 'Caller is not the owner of this waste item' from contract function 'Symbol(obj#343)'"
                 },
                 {
                   "u128": {

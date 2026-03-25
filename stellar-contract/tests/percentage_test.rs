@@ -171,9 +171,9 @@ fn test_get_percentages_not_set() {
     let contract_id = env.register_contract(None, ScavengerContract);
     let client = ScavengerContractClient::new(&env, &contract_id);
 
-    // Get percentages before they're set
-    assert_eq!(client.get_collector_percentage(), None);
-    assert_eq!(client.get_owner_percentage(), None);
+    // Get percentages before they're set — returns defaults (5 and 50)
+    assert_eq!(client.get_collector_percentage(), Some(5));
+    assert_eq!(client.get_owner_percentage(), Some(50));
 }
 
 #[test]

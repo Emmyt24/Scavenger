@@ -201,7 +201,7 @@ fn test_chain_with_multiple_collectors() {
     let recycler = Address::generate(&env);
     let submitter = Address::generate(&env);
     let collector1 = Address::generate(&env);
-    let collector2 = Address::generate(&env);
+    let manufacturer = Address::generate(&env);
     env.mock_all_auths();
 
     client.initialize_admin(&admin);
@@ -210,25 +210,25 @@ fn test_chain_with_multiple_collectors() {
     client.register_participant(&recycler, &ParticipantRole::Recycler, &symbol_short!("Rec"), &100, &200);
     client.register_participant(&submitter, &ParticipantRole::Recycler, &symbol_short!("Sub"), &300, &400);
     client.register_participant(&collector1, &ParticipantRole::Collector, &symbol_short!("Col1"), &500, &600);
-    client.register_participant(&collector2, &ParticipantRole::Collector, &symbol_short!("Col2"), &700, &800);
+    client.register_participant(&manufacturer, &ParticipantRole::Manufacturer, &symbol_short!("Mfr"), &700, &800);
 
     let material = client.submit_material(&WasteType::Metal, &2000, &submitter, &soroban_sdk::String::from_str(&env, "test"));
     
     client.transfer_waste(&material.id, &submitter, &collector1, &soroban_sdk::String::from_str(&env, "t1"));
-    client.transfer_waste(&material.id, &collector1, &collector2, &soroban_sdk::String::from_str(&env, "t2"));
+    client.transfer_waste(&material.id, &collector1, &manufacturer, &soroban_sdk::String::from_str(&env, "t2"));
     
     client.verify_material(&material.id, &recycler);
 
     let submitter_participant = client.get_participant(&submitter).unwrap();
     let collector1_participant = client.get_participant(&collector1).unwrap();
-    let collector2_participant = client.get_participant(&collector2).unwrap();
+    let manufacturer_participant = client.get_participant(&manufacturer).unwrap();
 
-    // After transfers, collector2 is the final owner
-    // Total: 100 tokens
-    // Each collector in chain: 10% = 10
-    // Final owner (collector2): 10% (as collector) + 40% (as owner) + 40% (remainder) = 90
+    // After transfers, manufacturer is the final owner
+    // Total: 100 tokens (2kg * 1 * 50)
+    // collector1: 10% = 10
+    // manufacturer (final owner): 30% (owner) + 60% (remainder) = 90
     assert_eq!(collector1_participant.total_tokens_earned, 10);
-    assert_eq!(collector2_participant.total_tokens_earned, 90);
+    assert_eq!(manufacturer_participant.total_tokens_earned, 90);
     assert_eq!(submitter_participant.total_tokens_earned, 0);
 }
 
@@ -277,8 +277,7 @@ fn test_long_chain_distribution() {
     let recycler = Address::generate(&env);
     let submitter = Address::generate(&env);
     let collector1 = Address::generate(&env);
-    let collector2 = Address::generate(&env);
-    let collector3 = Address::generate(&env);
+    let manufacturer = Address::generate(&env);
     env.mock_all_auths();
 
     client.initialize_admin(&admin);
@@ -287,30 +286,25 @@ fn test_long_chain_distribution() {
     client.register_participant(&recycler, &ParticipantRole::Recycler, &symbol_short!("Rec"), &100, &200);
     client.register_participant(&submitter, &ParticipantRole::Recycler, &symbol_short!("Sub"), &300, &400);
     client.register_participant(&collector1, &ParticipantRole::Collector, &symbol_short!("C1"), &500, &600);
-    client.register_participant(&collector2, &ParticipantRole::Collector, &symbol_short!("C2"), &700, &800);
-    client.register_participant(&collector3, &ParticipantRole::Collector, &symbol_short!("C3"), &900, &1000);
+    client.register_participant(&manufacturer, &ParticipantRole::Manufacturer, &symbol_short!("Mfr"), &700, &800);
 
     let material = client.submit_material(&WasteType::PetPlastic, &5000, &submitter, &soroban_sdk::String::from_str(&env, "test"));
     
     client.transfer_waste(&material.id, &submitter, &collector1, &soroban_sdk::String::from_str(&env, "t1"));
-    client.transfer_waste(&material.id, &collector1, &collector2, &soroban_sdk::String::from_str(&env, "t2"));
-    client.transfer_waste(&material.id, &collector2, &collector3, &soroban_sdk::String::from_str(&env, "t3"));
+    client.transfer_waste(&material.id, &collector1, &manufacturer, &soroban_sdk::String::from_str(&env, "t2"));
     
     client.verify_material(&material.id, &recycler);
 
     let submitter_participant = client.get_participant(&submitter).unwrap();
     let c1_participant = client.get_participant(&collector1).unwrap();
-    let c2_participant = client.get_participant(&collector2).unwrap();
-    let c3_participant = client.get_participant(&collector3).unwrap();
+    let mfr_participant = client.get_participant(&manufacturer).unwrap();
 
-    // After transfers, collector3 is the final owner
+    // After transfers, manufacturer is the final owner
     // Total: 150 tokens (5kg * 3 * 10)
-    // Each collector in chain: 8% = 12
-    // Final owner (collector3): 8% (as collector) + 40% (as owner) + 28% (remainder) = 114
-    // c1 and c2 each get: 12
+    // collector1: 8% = 12
+    // manufacturer (final owner): 40% (owner) + 52% (remainder) = 138
     assert_eq!(c1_participant.total_tokens_earned, 12);
-    assert_eq!(c2_participant.total_tokens_earned, 12);
-    assert_eq!(c3_participant.total_tokens_earned, 126); // 12 + 60 + 54
+    assert_eq!(mfr_participant.total_tokens_earned, 138);
     assert_eq!(submitter_participant.total_tokens_earned, 0);
 }
 

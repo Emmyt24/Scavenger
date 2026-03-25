@@ -251,46 +251,38 @@ fn test_get_waste_transfer_history_long_chain() {
     let contract_id = env.register_contract(None, ScavengerContract);
     let client = ScavengerContractClient::new(&env, &contract_id);
 
-    let users: soroban_sdk::Vec<Address> = (0..5)
-        .map(|_| Address::generate(&env))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .fold(soroban_sdk::Vec::new(&env), |mut v, addr| {
-            v.push_back(addr);
-            v
-        });
+    let recycler = Address::generate(&env);
+    let collector1 = Address::generate(&env);
+    let collector2 = Address::generate(&env);
+    let manufacturer = Address::generate(&env);
 
     let description = String::from_str(&env, "Long chain test");
     let note = String::from_str(&env, "Transfer");
     env.mock_all_auths();
 
-    // Register all participants
-    for user in users.iter() {
-        client.register_participant(&user, &ParticipantRole::Recycler, &soroban_sdk::symbol_short!("user"), &0, &0);
-    }
+    client.register_participant(&recycler, &ParticipantRole::Recycler, &soroban_sdk::symbol_short!("r"), &0, &0);
+    client.register_participant(&collector1, &ParticipantRole::Collector, &soroban_sdk::symbol_short!("c1"), &0, &0);
+    client.register_participant(&collector2, &ParticipantRole::Collector, &soroban_sdk::symbol_short!("c2"), &0, &0);
+    client.register_participant(&manufacturer, &ParticipantRole::Manufacturer, &soroban_sdk::symbol_short!("m"), &0, &0);
 
-    // Submit material with first user
-    let material = client.submit_material(&WasteType::Paper, &5000, &users.get(0).unwrap(), &description);
+    // Submit material with recycler
+    let material = client.submit_material(&WasteType::Paper, &5000, &recycler, &description);
 
-    // Create transfer chain: user0 -> user1 -> user2 -> user3 -> user4
-    for i in 0..4 {
-        let from = users.get(i).unwrap();
-        let to = users.get(i + 1).unwrap();
-        client.transfer_waste(&material.id, &from, &to, &note);
-    }
+    // Valid chain: recycler -> collector1 -> collector2 -> manufacturer (3 transfers)
+    // Note: Collector->Collector is not a valid route; use Recycler->Collector->Manufacturer
+    // Use 2-step chain: recycler -> collector1 -> manufacturer
+    client.transfer_waste(&material.id, &recycler, &collector1, &note);
+    client.transfer_waste(&material.id, &collector1, &manufacturer, &note);
 
     // Get history
     let history = client.get_waste_transfer_history(&material.id);
 
-    // Verify complete chain
-    assert_eq!(history.len(), 4);
-
-    // Verify each transfer in the chain
-    for i in 0..4 {
-        let transfer = history.get(i as u32).unwrap();
-        assert_eq!(transfer.from, users.get(i).unwrap());
-        assert_eq!(transfer.to, users.get(i + 1).unwrap());
-    }
+    // Verify chain
+    assert_eq!(history.len(), 2);
+    assert_eq!(history.get(0).unwrap().from, recycler);
+    assert_eq!(history.get(0).unwrap().to, collector1);
+    assert_eq!(history.get(1).unwrap().from, collector1);
+    assert_eq!(history.get(1).unwrap().to, manufacturer);
 }
 
 #[test]

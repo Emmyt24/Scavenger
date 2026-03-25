@@ -112,7 +112,9 @@
                 "symbol": "get_collector_percentage"
               }
             ],
-            "data": "void"
+            "data": {
+              "u32": 5
+            }
           }
         }
       },
@@ -157,7 +159,9 @@
                 "symbol": "get_owner_percentage"
               }
             ],
-            "data": "void"
+            "data": {
+              "u32": 50
+            }
           }
         }
       },

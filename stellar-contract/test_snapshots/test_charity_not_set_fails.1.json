@@ -158,10 +158,14 @@
                       },
                       {
                         "key": {
-                          "symbol": "RE_GUARD"
+                          "symbol": "PART_IDX"
                         },
                         "val": {
-                          "bool": false
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          ]
                         }
                       },
                       {
@@ -892,7 +896,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Charity contract not set' from contract function 'Symbol(obj#123)'"
+                  "string": "caught panic 'Charity contract not set' from contract function 'Symbol(obj#131)'"
                 },
                 {
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"

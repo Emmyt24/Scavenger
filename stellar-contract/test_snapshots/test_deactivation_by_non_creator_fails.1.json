@@ -143,6 +143,21 @@
                     "storage": [
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "general_incentives"
@@ -1169,7 +1184,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Only incentive creator can deactivate' from contract function 'Symbol(obj#203)'"
+                  "string": "caught panic 'Only incentive creator can deactivate' from contract function 'Symbol(obj#221)'"
                 },
                 {
                   "u64": 1

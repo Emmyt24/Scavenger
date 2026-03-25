@@ -14,8 +14,8 @@ fn setup(env: &Env) -> (ScavengerContractClient<'_>, Address) {
 #[should_panic(expected = "Unauthorized: caller is not admin")]
 fn test_transfer_admin_non_admin_cannot_transfer() {
     let env = Env::default();
-    let (client, _admin) = setup(&env);
     env.mock_all_auths();
+    let (client, _admin) = setup(&env);
     let non_admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
     let new_admins = vec![&env, new_admin];
@@ -25,8 +25,8 @@ fn test_transfer_admin_non_admin_cannot_transfer() {
 #[test]
 fn test_transfer_admin_new_admin_can_call_admin_functions() {
     let env = Env::default();
-    let (client, admin) = setup(&env);
     env.mock_all_auths();
+    let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
     let new_admins = vec![&env, new_admin.clone()];
     client.transfer_admin(&admin, &new_admins);
@@ -37,8 +37,8 @@ fn test_transfer_admin_new_admin_can_call_admin_functions() {
 #[should_panic(expected = "Unauthorized: caller is not admin")]
 fn test_transfer_admin_old_admin_loses_privileges() {
     let env = Env::default();
-    let (client, admin) = setup(&env);
     env.mock_all_auths();
+    let (client, admin) = setup(&env);
     let new_admin = Address::generate(&env);
     let new_admins = vec![&env, new_admin];
     client.transfer_admin(&admin, &new_admins);

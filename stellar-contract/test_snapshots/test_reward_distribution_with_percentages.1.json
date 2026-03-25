@@ -256,18 +256,45 @@
                       },
                       {
                         "key": {
-                          "symbol": "COL_PCT"
+                          "symbol": "PART_IDX"
                         },
                         "val": {
-                          "u32": 30
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          ]
                         }
                       },
                       {
                         "key": {
-                          "symbol": "OWN_PCT"
+                          "symbol": "RWD_CFG"
                         },
                         "val": {
-                          "u32": 20
+                          "map": [
+                            {
+                              "key": {
+                                "symbol": "collector_percentage"
+                              },
+                              "val": {
+                                "u32": 30
+                              }
+                            },
+                            {
+                              "key": {
+                                "symbol": "owner_percentage"
+                              },
+                              "val": {
+                                "u32": 20
+                              }
+                            }
+                          ]
                         }
                       },
                       {

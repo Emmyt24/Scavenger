@@ -207,6 +207,21 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "participant_wastes"
@@ -1565,7 +1580,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Cannot transfer deactivated waste' from contract function 'Symbol(obj#305)'"
+                  "string": "caught panic 'Cannot transfer deactivated waste' from contract function 'Symbol(obj#329)'"
                 },
                 {
                   "u128": {

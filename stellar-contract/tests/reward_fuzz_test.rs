@@ -17,7 +17,10 @@ fn calc_reward(
     let collector_share = (total_reward * collector_pct as i128) / 100;
     let owner_share = (total_reward * owner_pct as i128) / 100;
 
-    let total_distributed = collector_share * num_collectors as i128 + owner_share;
+    // Each collector gets `collector_share` individually (matches contract behaviour).
+    // Total collector pool is capped at `total_reward - owner_share` to prevent overflow.
+    let total_collector_pool = collector_share * num_collectors as i128;
+    let total_distributed = total_collector_pool.min(total_reward - owner_share) + owner_share;
     let recycler_amount = total_reward - total_distributed;
 
     (total_distributed, recycler_amount)

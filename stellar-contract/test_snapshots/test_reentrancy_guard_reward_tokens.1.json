@@ -158,10 +158,14 @@
                       },
                       {
                         "key": {
-                          "symbol": "RE_GUARD"
+                          "symbol": "PART_IDX"
                         },
                         "val": {
-                          "bool": false
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          ]
                         }
                       },
                       {

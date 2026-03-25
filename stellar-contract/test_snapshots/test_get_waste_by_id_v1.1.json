@@ -106,6 +106,18 @@
                     "storage": [
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "TOT_WGT"
                         },
                         "val": {
@@ -821,7 +833,7 @@
                 "bytes": "0000000000000000000000000000000000000000000000000000000000000001"
               },
               {
-                "symbol": "get_waste_by_id"
+                "symbol": "get_waste"
               }
             ],
             "data": {
@@ -844,7 +856,7 @@
                 "symbol": "fn_return"
               },
               {
-                "symbol": "get_waste_by_id"
+                "symbol": "get_waste"
               }
             ],
             "data": {

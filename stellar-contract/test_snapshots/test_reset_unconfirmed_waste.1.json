@@ -145,6 +145,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "participant_wastes"
@@ -942,7 +954,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Waste is not confirmed' from contract function 'Symbol(obj#125)'"
+                  "string": "caught panic 'Waste is not confirmed' from contract function 'Symbol(obj#133)'"
                 },
                 {
                   "u128": {

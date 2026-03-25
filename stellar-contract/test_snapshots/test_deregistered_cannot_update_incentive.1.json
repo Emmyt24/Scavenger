@@ -189,6 +189,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "general_incentives"
@@ -1465,7 +1477,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Participant is not registered' from contract function 'Symbol(obj#321)'"
+                  "string": "caught panic 'Participant is not registered' from contract function 'Symbol(obj#351)'"
                 },
                 {
                   "u64": 1

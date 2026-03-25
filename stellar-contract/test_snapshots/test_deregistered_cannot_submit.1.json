@@ -161,6 +161,18 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -1150,7 +1162,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Caller is not a registered participant' from contract function 'Symbol(obj#183)'"
+                  "string": "caught panic 'Caller is not a registered participant' from contract function 'Symbol(obj#207)'"
                 },
                 {
                   "u32": 2

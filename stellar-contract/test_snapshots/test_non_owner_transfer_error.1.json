@@ -207,6 +207,24 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "symbol": "TOT_WGT"
                         },
                         "val": {
@@ -1697,7 +1715,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Only waste owner can transfer' from contract function 'Symbol(obj#325)'"
+                  "string": "caught panic 'Only waste owner can transfer' from contract function 'Symbol(obj#355)'"
                 },
                 {
                   "u64": 1

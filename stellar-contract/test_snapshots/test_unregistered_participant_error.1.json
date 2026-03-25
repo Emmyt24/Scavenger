@@ -142,6 +142,21 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
@@ -964,7 +979,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Caller is not a registered participant' from contract function 'Symbol(obj#119)'"
+                  "string": "caught panic 'Caller is not a registered participant' from contract function 'Symbol(obj#131)'"
                 },
                 {
                   "u32": 2

@@ -238,6 +238,21 @@
                       },
                       {
                         "key": {
+                          "symbol": "PART_IDX"
+                        },
+                        "val": {
+                          "vec": [
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                            },
+                            {
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "key": {
                           "vec": [
                             {
                               "string": "participant_wastes"
@@ -1873,7 +1888,7 @@
             "data": {
               "vec": [
                 {
-                  "string": "caught panic 'Participant is not registered' from contract function 'Symbol(obj#401)'"
+                  "string": "caught panic 'Participant is not registered' from contract function 'Symbol(obj#447)'"
                 },
                 {
                   "u128": {
