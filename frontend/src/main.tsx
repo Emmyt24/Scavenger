@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { QueryClient, QueryClientProvider, MutationCache } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, MutationCache, QueryCache } from '@tanstack/react-query'
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { Toaster, toast } from 'sonner'
 import { App } from '@/App'
@@ -14,6 +14,9 @@ import './index.css'
 
 // Create a client
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({
+    onError: (error) => toast.error(getErrorMessage(error))
+  }),
   mutationCache: new MutationCache({
     onError: (error) => toast.error(getErrorMessage(error))
   }),
@@ -21,7 +24,7 @@ const queryClient = new QueryClient({
     queries: {
       refetchOnWindowFocus: false,
       retry: 1,
-      staleTime: 5000
+      staleTime: 5 * 60 * 1000 // 5 minutes
     }
   }
 })
@@ -41,7 +44,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           </AuthProvider>
         </ErrorBoundary>
       </ThemeProvider>
-      <ReactQueryDevtools initialIsOpen={false} />
+      {import.meta.env.DEV && <ReactQueryDevtools initialIsOpen={false} />}
     </QueryClientProvider>
   </React.StrictMode>
 )
