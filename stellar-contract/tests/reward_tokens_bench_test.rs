@@ -160,3 +160,55 @@ fn regression_collector_still_rewarded() {
     let sp = client.get_participant(&submitter).unwrap();
     assert_eq!(sp.total_tokens_earned, 0);
 }
+
+// ---------------------------------------------------------------------------
+// RewardConfig single-read benchmarks
+// ---------------------------------------------------------------------------
+
+/// Confirm that get_collector_percentage and get_owner_percentage both return
+/// the values written by set_percentages (single-struct round-trip).
+#[test]
+fn bench_reward_config_single_read() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+
+    client.set_percentages(&admin, &15, &35);
+
+    let before = env.budget().cpu_instruction_count();
+    let col = client.get_collector_percentage().unwrap();
+    let own = client.get_owner_percentage().unwrap();
+    let after = env.budget().cpu_instruction_count();
+
+    println!("[bench] reward_config reads cpu_instructions={}", after - before);
+    assert_eq!(col, 15);
+    assert_eq!(own, 35);
+}
+
+/// set_collector_percentage must not clobber owner_percentage.
+#[test]
+fn regression_partial_update_preserves_other_field() {
+    let env = Env::default();
+    let (client, admin) = setup(&env);
+
+    client.set_percentages(&admin, &10, &40);
+    client.set_collector_percentage(&admin, &20);
+
+    assert_eq!(client.get_collector_percentage().unwrap(), 20);
+    assert_eq!(client.get_owner_percentage().unwrap(), 40); // must be unchanged
+
+    client.set_owner_percentage(&admin, &30);
+
+    assert_eq!(client.get_collector_percentage().unwrap(), 20); // must be unchanged
+    assert_eq!(client.get_owner_percentage().unwrap(), 30);
+}
+
+/// Verify that reward_tokens_bench still works correctly after the
+/// RewardConfig migration (end-to-end smoke test).
+#[test]
+fn bench_reward_tokens_after_config_migration() {
+    let env = Env::default();
+    let (client, _) = setup(&env);
+    // depth=3 exercises both the config read and the collector loop
+    let cpu = measure_verify(&env, &client, 3);
+    println!("[bench] post-migration depth=3 cpu_instructions={cpu}");
+}

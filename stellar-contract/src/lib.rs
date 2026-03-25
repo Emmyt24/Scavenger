@@ -16,12 +16,28 @@ use soroban_sdk::{
 // Storage keys
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const CHARITY: Symbol = symbol_short!("CHARITY");
-const COLLECTOR_PCT: Symbol = symbol_short!("COL_PCT");
-const OWNER_PCT: Symbol = symbol_short!("OWN_PCT");
+const REWARD_CFG: Symbol = symbol_short!("RWD_CFG");
 const TOTAL_WEIGHT: Symbol = symbol_short!("TOT_WGT");
 const TOTAL_TOKENS: Symbol = symbol_short!("TOT_TKN");
 const REENTRANCY_GUARD: Symbol = symbol_short!("RE_GUARD");
 const TOKEN_ADDR: Symbol = symbol_short!("TKN_ADDR");
+
+/// Reward distribution percentages stored as a single instance-storage entry.
+///
+/// Consolidating `collector_percentage` and `owner_percentage` into one struct
+/// means a single `storage.get` call fetches both values, halving the number
+/// of instance-storage lookups on every `_reward_tokens` invocation.
+///
+/// Migration note: contracts deployed with the old two-key layout
+/// (`COL_PCT` / `OWN_PCT`) should call `set_percentages` once after upgrade
+/// to write the new `RWD_CFG` key; the old keys are then unused and will
+/// expire with the instance TTL.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardConfig {
+    pub collector_percentage: u32,
+    pub owner_percentage: u32,
+}
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,7 +235,21 @@ impl ScavengerContract {
 
     // ========== Percentage Configuration Functions ==========
 
-    /// Set both collector and owner percentages (admin only)
+    /// Read the reward config in one storage lookup (internal helper).
+    fn get_reward_config(env: &Env) -> RewardConfig {
+        env.storage()
+            .instance()
+            .get(&REWARD_CFG)
+            .unwrap_or(RewardConfig {
+                collector_percentage: 5,
+                owner_percentage: 50,
+            })
+    }
+
+    /// Set both collector and owner percentages (admin only).
+    ///
+    /// Writes a single `RewardConfig` entry instead of two separate keys,
+    /// so every subsequent read costs one instance lookup instead of two.
     pub fn set_percentages(
         env: Env,
         admin: Address,
@@ -227,56 +257,49 @@ impl ScavengerContract {
         owner_percentage: u32,
     ) {
         Self::only_admin(&env, &admin);
-        
-        // Validate percentages sum
+
         if collector_percentage + owner_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
 
-        env.storage()
-            .instance()
-            .set(&COLLECTOR_PCT, &collector_percentage);
-        env.storage().instance().set(&OWNER_PCT, &owner_percentage);
+        env.storage().instance().set(
+            &REWARD_CFG,
+            &RewardConfig { collector_percentage, owner_percentage },
+        );
     }
 
-    /// Get the collector percentage
+    /// Get the collector percentage.
     pub fn get_collector_percentage(env: Env) -> Option<u32> {
-        env.storage().instance().get(&COLLECTOR_PCT)
+        Some(Self::get_reward_config(&env).collector_percentage)
     }
 
-    /// Get the owner percentage
+    /// Get the owner percentage.
     pub fn get_owner_percentage(env: Env) -> Option<u32> {
-        env.storage().instance().get(&OWNER_PCT)
+        Some(Self::get_reward_config(&env).owner_percentage)
     }
 
-    /// Update only the collector percentage (admin only)
+    /// Update only the collector percentage (admin only).
     pub fn set_collector_percentage(env: Env, admin: Address, new_percentage: u32) {
         Self::only_admin(&env, &admin);
-        
-        // Get current owner percentage to validate total
-        let owner_pct: u32 = env.storage().instance().get(&OWNER_PCT).unwrap_or(0);
 
-        if new_percentage + owner_pct > 100 {
+        let mut cfg = Self::get_reward_config(&env);
+        if new_percentage + cfg.owner_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
-
-        env.storage()
-            .instance()
-            .set(&COLLECTOR_PCT, &new_percentage);
+        cfg.collector_percentage = new_percentage;
+        env.storage().instance().set(&REWARD_CFG, &cfg);
     }
 
-    /// Update only the owner percentage (admin only)
+    /// Update only the owner percentage (admin only).
     pub fn set_owner_percentage(env: Env, admin: Address, new_percentage: u32) {
         Self::only_admin(&env, &admin);
-        
-        // Get current collector percentage to validate total
-        let collector_pct: u32 = env.storage().instance().get(&COLLECTOR_PCT).unwrap_or(0);
 
-        if collector_pct + new_percentage > 100 {
+        let mut cfg = Self::get_reward_config(&env);
+        if cfg.collector_percentage + new_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
-
-        env.storage().instance().set(&OWNER_PCT, &new_percentage);
+        cfg.owner_percentage = new_percentage;
+        env.storage().instance().set(&REWARD_CFG, &cfg);
     }
 
     // ========== Token Management Functions ==========
@@ -475,9 +498,10 @@ impl ScavengerContract {
             return;
         }
 
-        // Single read for each percentage (2 reads total, unchanged)
-        let collector_pct: u32 = env.storage().instance().get(&COLLECTOR_PCT).unwrap_or(5);
-        let owner_pct: u32 = env.storage().instance().get(&OWNER_PCT).unwrap_or(50);
+        // One storage lookup fetches both percentages (was two separate gets)
+        let cfg = Self::get_reward_config(env);
+        let collector_pct = cfg.collector_percentage;
+        let owner_pct = cfg.owner_percentage;
 
         let collector_share = (total_reward * (collector_pct as u128)) / 100;
         let owner_share = (total_reward * (owner_pct as u128)) / 100;
