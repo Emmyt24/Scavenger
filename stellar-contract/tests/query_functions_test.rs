@@ -467,7 +467,7 @@ fn test_get_waste_by_id_v1() {
 
     let material = client.submit_material(&WasteType::Metal, &3000, &recycler, &soroban_sdk::String::from_str(&env, "test"));
 
-    let retrieved = client.get_waste_by_id(&material.id).unwrap();
+    let retrieved = client.get_waste(&material.id).unwrap();
 
     assert_eq!(retrieved.id, material.id);
     assert_eq!(retrieved.waste_type, WasteType::Metal);

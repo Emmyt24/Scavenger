@@ -240,23 +240,21 @@ fn test_get_waste_alias_compatibility() {
     // Submit material
     let material = client.submit_material(&WasteType::Glass, &6000, &user, &description);
 
-    // All three functions should return the same data
+    // get_waste and get_material are aliases — both must return identical data.
+    // get_waste_by_id is deprecated; callers should use get_waste directly.
     let w1 = client.get_waste(&material.id);
-    let w2 = client.get_waste_by_id(&material.id);
-    let w3 = client.get_material(&material.id);
+    let w2 = client.get_material(&material.id);
 
     assert!(w1.is_some());
     assert!(w2.is_some());
-    assert!(w3.is_some());
 
     let waste1 = w1.unwrap();
     let waste2 = w2.unwrap();
-    let waste3 = w3.unwrap();
 
     assert_eq!(waste1.id, waste2.id);
-    assert_eq!(waste2.id, waste3.id);
     assert_eq!(waste1.waste_type, waste2.waste_type);
-    assert_eq!(waste2.waste_type, waste3.waste_type);
+    assert_eq!(waste1.weight, waste2.weight);
+    assert_eq!(waste1.submitter, waste2.submitter);
 }
 
 #[test]

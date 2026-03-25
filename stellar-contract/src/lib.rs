@@ -1,43 +1,70 @@
 #![no_std]
 
+mod errors;
 mod events;
 mod types;
 mod validation;
 
+pub use errors::Error;
 pub use types::{
-    Incentive, Material, ParticipantRole, RecyclingStats, TransferItemType, TransferRecord, TransferStatus,
-    Waste, WasteTransfer, WasteType,
+    GlobalMetrics, Incentive, Material, ParticipantRole, RecyclingStats, TransferItemType,
+    TransferRecord, TransferStatus, Waste, WasteTransfer, WasteType,
 };
 
 use soroban_sdk::{
-    contract, contractimpl, contracttype, symbol_short, Address, Env, String, Symbol, Vec,
+    contract, contractimpl, contracttype, symbol_short, token, Address, Env, String, Symbol, Vec,
 };
 
 // Storage keys
 const ADMIN: Symbol = symbol_short!("ADMIN");
 const CHARITY: Symbol = symbol_short!("CHARITY");
-const COLLECTOR_PCT: Symbol = symbol_short!("COL_PCT");
-const OWNER_PCT: Symbol = symbol_short!("OWN_PCT");
+const REWARD_CFG: Symbol = symbol_short!("RWD_CFG");
 const TOTAL_WEIGHT: Symbol = symbol_short!("TOT_WGT");
 const TOTAL_TOKENS: Symbol = symbol_short!("TOT_TKN");
 const REENTRANCY_GUARD: Symbol = symbol_short!("RE_GUARD");
 const TOKEN_ADDR: Symbol = symbol_short!("TKN_ADDR");
+const PAUSED: Symbol = symbol_short!("PAUSED");
 
+/// Reward distribution percentages stored as a single instance-storage entry.
+///
+/// Consolidating `collector_percentage` and `owner_percentage` into one struct
+/// means a single `storage.get` call fetches both values, halving the number
+/// of instance-storage lookups on every `_reward_tokens` invocation.
+///
+/// Migration note: contracts deployed with the old two-key layout
+/// (`COL_PCT` / `OWN_PCT`) should call `set_percentages` once after upgrade
+/// to write the new `RWD_CFG` key; the old keys are then unused and will
+/// expire with the instance TTL.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RewardConfig {
+    /// Percentage of total reward distributed to each collector in the transfer chain.
+    pub collector_percentage: u32,
+    /// Percentage of total reward distributed to the current waste owner.
+    pub owner_percentage: u32,
+}
+
+/// On-chain record for a registered supply-chain participant.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Participant {
     pub address: Address,
     pub role: ParticipantRole,
     pub name: soroban_sdk::Symbol,
+    /// Latitude in microdegrees (e.g. 1_000_000 = 1.0°).
     pub latitude: i128,
+    /// Longitude in microdegrees.
     pub longitude: i128,
     pub is_registered: bool,
+    /// Cumulative grams of waste processed.
     pub total_waste_processed: u128,
+    /// Cumulative reward tokens earned.
     pub total_tokens_earned: u128,
+    /// Ledger timestamp at registration.
     pub registered_at: u64,
 }
 
-/// Represents a manufacturer incentive program for recycling specific waste types
+/// Combined view of a participant and their recycling statistics.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParticipantInfo {
@@ -52,7 +79,16 @@ pub struct ScavengerContract;
 impl ScavengerContract {
     // ========== Admin Functions ==========
 
-    /// Initialize admin (should be called once during contract deployment)
+    /// Initialise the contract administrator.
+    ///
+    /// Must be called exactly once, immediately after deployment.
+    /// Subsequent calls panic with `"Admin already initialized"`.
+    ///
+    /// # Parameters
+    /// - `admin`: Address that will hold admin privileges. Must sign the transaction.
+    ///
+    /// # Errors
+    /// - Panics `"Admin already initialized"` if called more than once.
     pub fn initialize_admin(env: Env, admin: Address) {
         admin.require_auth();
 
@@ -64,9 +100,21 @@ impl ScavengerContract {
         env.storage().instance().set(&ADMIN, &admin);
     }
 
-    /// Get the current admin address
+    /// Get the current admin address.
+    ///
+    /// # Returns
+    /// The `Address` of the contract administrator.
+    ///
+    /// # Errors
+    /// - Panics `"Admin not set"` if [`initialize_admin`] has not been called.
     pub fn get_admin(env: Env) -> Address {
         env.storage().instance().get(&ADMIN).expect("Admin not set")
+    }
+
+    /// Transfer admin rights to a new address (current admin only)
+    pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
+        Self::require_admin(&env, &current_admin);
+        env.storage().instance().set(&ADMIN, &new_admin);
     }
 
     /// Check if caller is admin
@@ -156,7 +204,15 @@ impl ScavengerContract {
 
     // ========== Charity Contract Functions ==========
 
-    /// Set the charity contract address (admin only)
+    /// Set the charity contract address that receives donations.
+    ///
+    /// # Parameters
+    /// - `admin`: Must be the current contract admin and sign the transaction.
+    /// - `charity_address`: Target charity contract. Must differ from `admin`.
+    ///
+    /// # Errors
+    /// - Panics `"Charity address cannot be the same as admin"`.
+    /// - Panics `"Caller is not the contract admin"` if `admin` is not the admin.
     pub fn set_charity_contract(env: Env, admin: Address, charity_address: Address) {
         Self::only_admin(&env, &admin);
         
@@ -169,14 +225,27 @@ impl ScavengerContract {
         env.storage().instance().set(&CHARITY, &charity_address);
     }
 
-    /// Get the charity contract address
+    /// Get the configured charity contract address.
+    ///
+    /// # Returns
+    /// `Some(Address)` if set, `None` otherwise.
     pub fn get_charity_contract(env: Env) -> Option<Address> {
         env.storage().instance().get(&CHARITY)
     }
 
-    /// Donate tokens to charity
-    /// Records the donation and emits an event for tracking
-    /// Protected against reentrancy attacks
+    /// Donate tokens from the caller's earned balance to the charity contract.
+    ///
+    /// Deducts `amount` from `donor.total_tokens_earned` and emits a
+    /// `donation_made` event. Protected by a reentrancy guard.
+    ///
+    /// # Parameters
+    /// - `donor`: Registered participant making the donation. Must sign.
+    /// - `amount`: Number of tokens to donate (must be > 0).
+    ///
+    /// # Errors
+    /// - Panics `"Donation amount must be greater than zero"`.
+    /// - Panics `"Insufficient balance"` if donor has fewer tokens than `amount`.
+    /// - Panics `"Charity contract not set"` if no charity address is configured.
     pub fn donate_to_charity(env: Env, donor: Address, amount: i128) {
         // Reentrancy guard
         Self::lock(&env);
@@ -219,7 +288,36 @@ impl ScavengerContract {
 
     // ========== Percentage Configuration Functions ==========
 
-    /// Set both collector and owner percentages (admin only)
+    /// Read the reward config in one storage lookup (internal helper).
+    fn get_reward_config(env: &Env) -> RewardConfig {
+        env.storage()
+            .instance()
+            .get(&REWARD_CFG)
+            .unwrap_or(RewardConfig {
+                collector_percentage: 5,
+                owner_percentage: 50,
+            })
+    }
+
+    /// Set both collector and owner reward percentages atomically.
+    ///
+    /// Persists a single [`RewardConfig`] entry so that every subsequent
+    /// `_reward_tokens` call costs one storage lookup instead of two.
+    /// Defaults before first call: collector = 5 %, owner = 50 %.
+    ///
+    /// # Parameters
+    /// - `admin`: Contract admin. Must sign.
+    /// - `collector_percentage`: Share (0–100) given to each collector in the chain.
+    /// - `owner_percentage`: Share (0–100) given to the current waste owner.
+    ///
+    /// # Errors
+    /// - Panics `"Total percentages cannot exceed 100"` if the sum > 100.
+    ///
+    /// # Example
+    /// ```text
+    /// set_percentages(admin, 10, 40)
+    /// // collectors get 10 %, owner gets 40 %, remainder goes to recycler
+    /// ```
     pub fn set_percentages(
         env: Env,
         admin: Address,
@@ -227,74 +325,104 @@ impl ScavengerContract {
         owner_percentage: u32,
     ) {
         Self::only_admin(&env, &admin);
-        
-        // Validate percentages sum
+
         if collector_percentage + owner_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
 
-        env.storage()
-            .instance()
-            .set(&COLLECTOR_PCT, &collector_percentage);
-        env.storage().instance().set(&OWNER_PCT, &owner_percentage);
+        env.storage().instance().set(
+            &REWARD_CFG,
+            &RewardConfig { collector_percentage, owner_percentage },
+        );
     }
 
-    /// Get the collector percentage
+    /// Get the current collector reward percentage.
+    ///
+    /// Always returns `Some`; defaults to `5` if never explicitly set.
     pub fn get_collector_percentage(env: Env) -> Option<u32> {
-        env.storage().instance().get(&COLLECTOR_PCT)
+        Some(Self::get_reward_config(&env).collector_percentage)
     }
 
-    /// Get the owner percentage
+    /// Get the current owner reward percentage.
+    ///
+    /// Always returns `Some`; defaults to `50` if never explicitly set.
     pub fn get_owner_percentage(env: Env) -> Option<u32> {
-        env.storage().instance().get(&OWNER_PCT)
+        Some(Self::get_reward_config(&env).owner_percentage)
     }
 
-    /// Update only the collector percentage (admin only)
+    /// Update only the collector percentage, preserving the owner percentage.
+    ///
+    /// # Parameters
+    /// - `admin`: Contract admin. Must sign.
+    /// - `new_percentage`: New collector share (0–100).
+    ///
+    /// # Errors
+    /// - Panics `"Total percentages cannot exceed 100"` if `new_percentage + owner_pct > 100`.
     pub fn set_collector_percentage(env: Env, admin: Address, new_percentage: u32) {
         Self::only_admin(&env, &admin);
-        
-        // Get current owner percentage to validate total
-        let owner_pct: u32 = env.storage().instance().get(&OWNER_PCT).unwrap_or(0);
 
-        if new_percentage + owner_pct > 100 {
+        let mut cfg = Self::get_reward_config(&env);
+        if new_percentage + cfg.owner_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
-
-        env.storage()
-            .instance()
-            .set(&COLLECTOR_PCT, &new_percentage);
+        cfg.collector_percentage = new_percentage;
+        env.storage().instance().set(&REWARD_CFG, &cfg);
     }
 
-    /// Update only the owner percentage (admin only)
+    /// Update only the owner percentage, preserving the collector percentage.
+    ///
+    /// # Parameters
+    /// - `admin`: Contract admin. Must sign.
+    /// - `new_percentage`: New owner share (0–100).
+    ///
+    /// # Errors
+    /// - Panics `"Total percentages cannot exceed 100"` if `collector_pct + new_percentage > 100`.
     pub fn set_owner_percentage(env: Env, admin: Address, new_percentage: u32) {
         Self::only_admin(&env, &admin);
-        
-        // Get current collector percentage to validate total
-        let collector_pct: u32 = env.storage().instance().get(&COLLECTOR_PCT).unwrap_or(0);
 
-        if collector_pct + new_percentage > 100 {
+        let mut cfg = Self::get_reward_config(&env);
+        if cfg.collector_percentage + new_percentage > 100 {
             panic!("Total percentages cannot exceed 100");
         }
-
-        env.storage().instance().set(&OWNER_PCT, &new_percentage);
+        cfg.owner_percentage = new_percentage;
+        env.storage().instance().set(&REWARD_CFG, &cfg);
     }
 
     // ========== Token Management Functions ==========
 
-    /// Set the token contract address (admin only)
+    /// Set the SEP-41 token contract address used for reward transfers.
+    ///
+    /// # Parameters
+    /// - `admin`: Contract admin. Must sign.
+    /// - `token_address`: Address of the token contract.
     pub fn set_token_address(env: Env, admin: Address, token_address: Address) {
         Self::require_admin(&env, &admin);
         env.storage().instance().set(&TOKEN_ADDR, &token_address);
     }
 
-    /// Get the token contract address
+    /// Get the configured token contract address.
+    ///
+    /// # Returns
+    /// `Some(Address)` if set via [`set_token_address`], `None` otherwise.
     pub fn get_token_address(env: Env) -> Option<Address> {
         env.storage().instance().get(&TOKEN_ADDR)
     }
 
-    /// Reward tokens to participants based on waste processing
-    /// Protected against reentrancy attacks
-    /// This function distributes tokens from the rewarder to recipients
+    /// Manually reward tokens to a registered recipient.
+    ///
+    /// Increments `recipient.total_tokens_earned` and the global token counter,
+    /// then emits a `tokens_rewarded` event. Protected by a reentrancy guard.
+    ///
+    /// # Parameters
+    /// - `rewarder`: Caller authorising the reward. Must sign.
+    /// - `recipient`: Registered participant receiving the tokens.
+    /// - `amount`: Token amount (must be > 0).
+    /// - `waste_id`: Associated waste record ID (used in the emitted event).
+    ///
+    /// # Errors
+    /// - Panics `"Reward amount must be greater than zero"`.
+    /// - Panics `"Recipient not registered"`.
+    /// - Panics `"Token address not set"` if [`set_token_address`] was not called.
     pub fn reward_tokens(
         env: Env,
         rewarder: Address,
@@ -364,7 +492,10 @@ impl ScavengerContract {
         env.storage().instance().set(&key, participant);
     }
 
-    /// Check if a participant is registered
+    /// Check whether an address is a registered participant.
+    ///
+    /// # Returns
+    /// `true` if the address exists in storage and `is_registered == true`.
     pub fn is_participant_registered(env: Env, address: Address) -> bool {
         let key = (address,);
         if let Some(p) = env.storage().instance().get::<_, Participant>(&key) {
@@ -374,8 +505,28 @@ impl ScavengerContract {
         }
     }
 
-    /// Register a new participant with a specific role
-    /// Prevents duplicate registrations
+    /// Register a new supply-chain participant.
+    ///
+    /// Stores the participant on-chain and emits a `participant_registered` event.
+    ///
+    /// # Parameters
+    /// - `address`: Participant's Stellar address. Must sign.
+    /// - `role`: [`ParticipantRole`] — `Recycler`, `Collector`, or `Manufacturer`.
+    /// - `name`: Short display name (Soroban `Symbol`, max 32 chars).
+    /// - `latitude`: Location in microdegrees (e.g. `52_520_000` = 52.52°N).
+    /// - `longitude`: Location in microdegrees.
+    ///
+    /// # Returns
+    /// The newly created [`Participant`] record.
+    ///
+    /// # Errors
+    /// - Panics `"Participant already registered"` on duplicate registration.
+    /// - Panics on invalid coordinates (see [`validation::validate_coordinates`]).
+    ///
+    /// # Example
+    /// ```text
+    /// register_participant(alice, ParticipantRole::Recycler, "alice", 52_520_000, 13_405_000)
+    /// ```
     pub fn register_participant(
         env: Env,
         address: Address,
@@ -384,6 +535,7 @@ impl ScavengerContract {
         latitude: i128,
         longitude: i128,
     ) -> Participant {
+        Self::require_not_paused(&env);
         address.require_auth();
 
         // Validate coordinates
@@ -464,25 +616,34 @@ impl ScavengerContract {
         }
     }
 
-    /// Helper to distribute token rewards and emit events through the supply chain
+    /// Helper to distribute token rewards and emit events through the supply chain.
+    /// Batches reads and merges writes to minimise storage round-trips.
     fn _reward_tokens(
         env: &Env,
         waste_id: u64,
         total_reward: u128,
     ) {
-        let transfers = Self::get_transfer_history(env.clone(), waste_id);
-        
-        let collector_pct: u32 = env.storage().instance().get(&COLLECTOR_PCT).unwrap_or(5);
-        let owner_pct: u32 = env.storage().instance().get(&OWNER_PCT).unwrap_or(50);
-        
+        if total_reward == 0 {
+            return;
+        }
+
+        // One storage lookup fetches both percentages (was two separate gets)
+        let cfg = Self::get_reward_config(env);
+        let collector_pct = cfg.collector_percentage;
+        let owner_pct = cfg.owner_percentage;
+
         let collector_share = (total_reward * (collector_pct as u128)) / 100;
         let owner_share = (total_reward * (owner_pct as u128)) / 100;
-        
+
+        // Read transfer history once
+        let transfers = Self::get_transfer_history(env.clone(), waste_id);
+
         let mut total_distributed: u128 = 0;
-        
-        // Iterate through transfer history and reward collectors
+
+        // Reward collectors — one read per unique transfer recipient
         for transfer in transfers.iter() {
-            let participant: Option<Participant> = env.storage().instance().get(&(transfer.to.clone(),));
+            let key = (transfer.to.clone(),);
+            let participant: Option<Participant> = env.storage().instance().get(&key);
             if let Some(p) = participant {
                 if matches!(p.role, ParticipantRole::Collector) {
                     total_distributed += collector_share;
@@ -491,17 +652,31 @@ impl ScavengerContract {
                 }
             }
         }
-        
-        // Reward original owner and current recycler
+
+        // Reward the current owner (submitter) — merge owner_share + remainder into one
+        // read-modify-write instead of two separate calls.
         if let Some(material) = Self::get_waste_internal(env, waste_id) {
-            total_distributed += owner_share;
-            Self::update_participant_stats(env, &material.submitter, 0, owner_share as u64);
-            events::emit_tokens_rewarded(env, &material.submitter, owner_share, waste_id);
-            
-            let recycler_amount = total_reward.saturating_sub(total_distributed);
-            if recycler_amount > 0 {
-                Self::update_participant_stats(env, &material.submitter, 0, recycler_amount as u64);
-                events::emit_tokens_rewarded(env, &material.submitter, recycler_amount, waste_id);
+            let recycler_amount = total_reward.saturating_sub(total_distributed + owner_share);
+            let submitter_total = owner_share + recycler_amount; // = total_reward - total_distributed
+
+            if submitter_total > 0 {
+                let key = (material.submitter.clone(),);
+                if let Some(mut participant) = env.storage().instance().get::<_, Participant>(&key) {
+                    participant.total_tokens_earned = participant
+                        .total_tokens_earned
+                        .checked_add(submitter_total as u128)
+                        .expect("Overflow in total_tokens_earned");
+                    env.storage().instance().set(&key, &participant);
+                }
+
+                // Single global-tokens update for the submitter's combined share
+                Self::add_to_total_tokens(env, submitter_total as u128);
+
+                // Emit two events to preserve existing behaviour / test expectations
+                events::emit_tokens_rewarded(env, &material.submitter, owner_share, waste_id);
+                if recycler_amount > 0 {
+                    events::emit_tokens_rewarded(env, &material.submitter, recycler_amount, waste_id);
+                }
             }
         }
     }
@@ -520,27 +695,40 @@ impl ScavengerContract {
         env.storage().instance().get(&key)
     }
 
-    /// Check if a waste record exists
+    /// Check whether a waste record with the given ID exists.
+    ///
+    /// # Returns
+    /// `true` if the record is present in storage.
     pub fn waste_exists(env: Env, waste_id: u64) -> bool {
         let key = ("waste", waste_id);
         env.storage().instance().has(&key)
     }
 
-    /// Convert waste type enum to a human-readable string.
+    /// Convert a [`WasteType`] variant to its human-readable string label.
+    ///
+    /// # Returns
+    /// A Soroban `String` such as `"Plastic"` or `"Metal"`.
     pub fn get_waste_type_string(env: Env, waste_type: WasteType) -> String {
         String::from_str(&env, waste_type.as_str())
     }
 
-    /// Convert participant role enum to a human-readable string.
+    /// Convert a [`ParticipantRole`] variant to its human-readable string label.
+    ///
+    /// # Returns
+    /// A Soroban `String` such as `"Recycler"`, `"Collector"`, or `"Manufacturer"`.
     pub fn get_participant_role_string(env: Env, role: ParticipantRole) -> String {
         String::from_str(&env, role.as_str())
     }
 
-    /// Validate whether a transfer route is allowed between two participants.
+    /// Check whether a transfer from `from` to `to` is a permitted role transition.
+    ///
     /// Valid routes:
-    /// - Recycler -> Collector
-    /// - Recycler -> Manufacturer
-    /// - Collector -> Manufacturer
+    /// - `Recycler → Collector`
+    /// - `Recycler → Manufacturer`
+    /// - `Collector → Manufacturer`
+    ///
+    /// # Returns
+    /// `true` if both participants are registered and the role transition is allowed.
     pub fn is_valid_transfer(env: Env, from: Address, to: Address) -> bool {
         let from_participant: Option<Participant> = env.storage().instance().get(&(from,));
         let to_participant: Option<Participant> = env.storage().instance().get(&(to,));
@@ -613,7 +801,10 @@ impl ScavengerContract {
         Self::get_incentive_internal(env, incentive_id)
     }
 
-    /// Check if an incentive record exists
+    /// Check whether an incentive record with the given ID exists.
+    ///
+    /// # Returns
+    /// `true` if the record is present in storage.
     pub fn incentive_exists(env: Env, incentive_id: u64) -> bool {
         let key = ("incentive", incentive_id);
         env.storage().instance().has(&key)
@@ -672,13 +863,27 @@ impl ScavengerContract {
         total_weight
     }
 
-    /// Get incentive by ID
+    /// Retrieve an incentive by its numeric ID.
+    ///
+    /// # Returns
+    /// `Some(Incentive)` if found, `None` otherwise.
     pub fn get_incentive_by_id(env: Env, incentive_id: u64) -> Option<Incentive> {
         Self::get_incentive(&env, incentive_id)
     }
 
-    /// Update incentive active status
-    /// Only the rewarder can update their incentive
+    /// Toggle the active status of an incentive.
+    ///
+    /// Only the original `rewarder` who created the incentive may call this.
+    ///
+    /// # Parameters
+    /// - `incentive_id`: ID of the incentive to update.
+    /// - `is_active`: `true` to re-enable, `false` to pause.
+    ///
+    /// # Returns
+    /// The updated [`Incentive`].
+    ///
+    /// # Errors
+    /// - Panics `"Incentive not found"`.
     pub fn update_incentive_status(env: Env, incentive_id: u64, is_active: bool) -> Incentive {
         let mut incentive: Incentive =
             Self::get_incentive(&env, incentive_id).expect("Incentive not found");
@@ -693,9 +898,25 @@ impl ScavengerContract {
         incentive
     }
 
-    /// Update an existing incentive's reward and budget
-    /// Only the rewarder can update their incentive
-    /// Only active incentives can be updated
+    /// Update the reward points and total budget of an active incentive.
+    ///
+    /// Remaining budget is recalculated as `new_total_budget - budget_already_used`.
+    /// If `new_total_budget` is less than the amount already spent, the incentive
+    /// is automatically deactivated.
+    ///
+    /// # Parameters
+    /// - `incentive_id`: ID of the incentive to update.
+    /// - `new_reward_points`: New points per kg (must be > 0).
+    /// - `new_total_budget`: New total token budget (must be > 0).
+    ///
+    /// # Returns
+    /// The updated [`Incentive`].
+    ///
+    /// # Errors
+    /// - Panics `"Incentive not found"`.
+    /// - Panics `"Incentive is not active"`.
+    /// - Panics `"Reward must be greater than zero"`.
+    /// - Panics `"Total budget must be greater than zero"`.
     pub fn update_incentive(
         env: Env,
         incentive_id: u64,
@@ -750,8 +971,20 @@ impl ScavengerContract {
         incentive
     }
 
-    /// Calculate reward for a given waste amount based on an incentive
-    /// Returns the reward amount in tokens
+    /// Calculate the token reward for a given waste amount under a specific incentive.
+    ///
+    /// Formula: `floor(waste_amount / 1000) * reward_points`, capped at
+    /// `incentive.remaining_budget`. Returns `0` if the incentive is inactive.
+    ///
+    /// # Parameters
+    /// - `incentive_id`: ID of the incentive to use.
+    /// - `waste_amount`: Waste weight in grams.
+    ///
+    /// # Returns
+    /// Token reward amount (`u64`). Returns `0` for inactive incentives.
+    ///
+    /// # Errors
+    /// - Panics `"Incentive not found"`.
     pub fn calculate_incentive_reward(
         env: Env,
         incentive_id: u64,
@@ -777,7 +1010,13 @@ impl ScavengerContract {
         }
     }
 
-    /// Get all incentives for a specific waste type
+    /// Get all active incentives for a specific waste type, sorted by reward descending.
+    ///
+    /// # Parameters
+    /// - `waste_type`: The [`WasteType`] to filter by.
+    ///
+    /// # Returns
+    /// A `Vec<Incentive>` ordered highest `reward_points` first.
     pub fn get_incentives_by_waste_type(
         env: Env,
         waste_type: WasteType,
@@ -807,12 +1046,15 @@ impl ScavengerContract {
         results
     }
 
-    /// Get all incentives for a specific waste type (alias)
+    /// Alias for [`get_incentives_by_waste_type`].
     pub fn get_incentives(env: Env, waste_type: WasteType) -> soroban_sdk::Vec<Incentive> {
         Self::get_incentives_by_waste_type(env, waste_type)
     }
 
-    /// Get all active incentives
+    /// Get all currently active incentives across all waste types.
+    ///
+    /// # Returns
+    /// A `Vec<Incentive>` in insertion order.
     pub fn get_active_incentives(env: Env) -> soroban_sdk::Vec<Incentive> {
         let mut results = soroban_sdk::Vec::new(&env);
         let count = Self::get_incentive_count(&env);
@@ -828,15 +1070,19 @@ impl ScavengerContract {
         results
     }
 
-    /// Get participant information
+    /// Retrieve a participant record by address.
+    ///
+    /// # Returns
+    /// `Some(Participant)` if the address is registered, `None` otherwise.
     pub fn get_participant(env: Env, address: Address) -> Option<Participant> {
         let key = (address,);
         env.storage().instance().get(&key)
     }
 
-    /// Get participant information with current statistics
-    /// Returns participant details along with their recycling statistics
-    /// Returns None if participant is not registered
+    /// Retrieve a participant together with their recycling statistics.
+    ///
+    /// # Returns
+    /// `Some(ParticipantInfo)` if registered, `None` if the address is unknown.
     pub fn get_participant_info(env: Env, address: Address) -> Option<ParticipantInfo> {
         let participant = Self::get_participant(env.clone(), address.clone())?;
         let stats =
@@ -845,8 +1091,20 @@ impl ScavengerContract {
         Some(ParticipantInfo { participant, stats })
     }
 
-    /// Update participant role
-    /// Preserves registration timestamp and other data
+    /// Change the role of a registered participant.
+    ///
+    /// All other fields (name, location, stats, timestamps) are preserved.
+    ///
+    /// # Parameters
+    /// - `address`: Participant's address. Must sign.
+    /// - `new_role`: The [`ParticipantRole`] to assign.
+    ///
+    /// # Returns
+    /// The updated [`Participant`].
+    ///
+    /// # Errors
+    /// - Panics `"Participant not found"`.
+    /// - Panics `"Participant is not registered"`.
     pub fn update_role(env: Env, address: Address, new_role: ParticipantRole) -> Participant {
         address.require_auth();
 
@@ -864,7 +1122,19 @@ impl ScavengerContract {
         participant
     }
 
-    /// Deregister a participant (sets is_registered to false)
+    /// Mark a participant as deregistered (`is_registered = false`).
+    ///
+    /// The record is retained in storage; the participant can no longer
+    /// perform role-gated actions.
+    ///
+    /// # Parameters
+    /// - `address`: Participant's address. Must sign.
+    ///
+    /// # Returns
+    /// The updated [`Participant`] with `is_registered = false`.
+    ///
+    /// # Errors
+    /// - Panics `"Participant not found"`.
     pub fn deregister_participant(env: Env, address: Address) -> Participant {
         address.require_auth();
 
@@ -882,13 +1152,18 @@ impl ScavengerContract {
     }
 
     /// Update participant location
-    pub fn update_location(
+    /// Update the location of a registered participant.
+    /// Only the participant themselves can call this.
+    /// Coordinates are scaled by 1e6 (e.g. 40_000_000 = 40.000000°).
+    pub fn update_participant_location(
         env: Env,
         address: Address,
         latitude: i128,
         longitude: i128,
     ) -> Participant {
         address.require_auth();
+
+        validation::validate_coordinates(latitude, longitude);
 
         let key = (address.clone(),);
         let mut participant: Participant = env
@@ -897,7 +1172,6 @@ impl ScavengerContract {
             .get(&key)
             .expect("Participant not found");
 
-        // Validate participant is registered
         if !participant.is_registered {
             panic!("Participant is not registered");
         }
@@ -906,13 +1180,34 @@ impl ScavengerContract {
         participant.longitude = longitude;
         env.storage().instance().set(&key, &participant);
 
+        events::emit_participant_location_updated(&env, &address, latitude, longitude);
+
         participant
+    }
+
+    /// Update participant location.
+    ///
+    /// # Deprecated
+    /// Use [`update_participant_location`] instead. That function also validates
+    /// coordinates and emits a `ParticipantLocationUpdated` event.
+    pub fn update_location(
+        env: Env,
+        address: Address,
+        latitude: i128,
+        longitude: i128,
+    ) -> Participant {
+        Self::update_participant_location(env, address, latitude, longitude)
     }
 
     // ========== Waste Transfer History Functions ==========
 
-    /// Get transfer history for a specific waste
-    /// Returns chronologically ordered list of transfers
+    /// Get the full transfer history for a waste item (v1 storage).
+    ///
+    /// Checks v2 storage first (`transfer_history` key with `u128` waste ID),
+    /// then falls back to v1 (`transfers` key with `u64` waste ID).
+    ///
+    /// # Returns
+    /// Chronologically ordered `Vec<WasteTransfer>`. Empty if no transfers recorded.
     pub fn get_transfer_history(env: Env, waste_id: u64) -> Vec<WasteTransfer> {
         // Check v2 storage first (uses u128 waste_id)
         let v2_key = ("transfer_history", waste_id as u128);
@@ -925,15 +1220,15 @@ impl ScavengerContract {
         env.storage().instance().get(&key).unwrap_or(Vec::new(&env))
     }
 
-    /// Get complete transfer history for a waste (alias for get_transfer_history)
-    /// Returns chronologically ordered list of all transfers
-    /// Includes all transfer details: from, to, timestamp, and notes
+    /// Alias for [`get_transfer_history`] — returns the full transfer log for a waste item.
     pub fn get_waste_transfer_history(env: Env, waste_id: u64) -> Vec<WasteTransfer> {
         Self::get_transfer_history(env, waste_id)
     }
 
-    /// Get transfer history for a waste (v2 - uses u128 waste_id)
-    /// Returns chronologically ordered list of transfers for new waste system
+    /// Get the transfer history for a v2 waste item (uses `u128` waste ID).
+    ///
+    /// # Returns
+    /// Chronologically ordered `Vec<WasteTransfer>`. Empty if no transfers recorded.
     pub fn get_waste_transfer_history_v2(env: Env, waste_id: u128) -> Vec<WasteTransfer> {
         let key = ("transfer_history", waste_id);
         env.storage().instance().get(&key).unwrap_or(Vec::new(&env))
@@ -961,6 +1256,16 @@ impl ScavengerContract {
     }
 
     /// Transfer waste ownership from one participants to another
+    /// Transfer waste ownership (v1 — u64 waste IDs, String note).
+    ///
+    /// # Deprecated
+    /// Use [`transfer_waste_v2`] instead. v2 uses u128 waste IDs, records
+    /// GPS coordinates, validates transfer routes, and maintains the
+    /// `participant_wastes` index. This function is kept for backward
+    /// compatibility and will be removed in a future release.
+    ///
+    /// Migration: replace `transfer_waste(id, from, to, note)` with
+    /// `transfer_waste_v2(id as u128, from, to, latitude, longitude)`.
     pub fn transfer_waste(
         env: Env,
         waste_id: u64,
@@ -970,35 +1275,42 @@ impl ScavengerContract {
     ) -> Material {
         from.require_auth();
 
-        // Verify both participants are registered
-        if !Self::is_participant_registered(env.clone(), from.clone()) {
-            panic!("Sender not registered");
-        }
-        if !Self::is_participant_registered(env.clone(), to.clone()) {
-            panic!("Receiver not registered");
-        }
+        Self::require_not_paused(&env);
+        Self::require_registered(&env, &from);
+        Self::require_registered(&env, &to);
 
-        // Get and update material
         let mut material: Material =
             Self::get_waste_internal(&env, waste_id).expect("Waste not found");
 
-        // Verify sender owns the waste
         if material.submitter != from {
             panic!("Only waste owner can transfer");
         }
 
-        // Update ownership
+        assert!(from != to, "Cannot transfer waste to self");
+
+        // Align with v2: reject transfers on deactivated waste
+        if !material.is_active {
+            panic!("Cannot transfer deactivated waste");
+        }
+
+        // Align with v2: enforce valid transfer routes
+        if !Self::is_valid_transfer(env.clone(), from.clone(), to.clone()) {
+            panic!("Invalid transfer: role combination not allowed");
+        }
+
         material.submitter = to.clone();
         Self::set_waste(&env, waste_id, &material);
 
-        // Record transfer in history
         events::emit_waste_transferred(&env, waste_id, &from, &to);
         Self::record_transfer(&env, waste_id, from, to, note);
 
         material
     }
 
-    /// Get all transfers for a participants (as sender)
+    /// Get all outbound transfers for a participant.
+    ///
+    /// > **Note:** Currently returns an empty list. A sender index is required
+    /// > for efficient lookup and is not yet implemented.
     pub fn get_transfers_from(env: Env, _address: Address) -> Vec<(u64, Vec<WasteTransfer>)> {
         // Note: This is a simplified implementation
         // In production, you'd want to maintain an index for efficient queries
@@ -1007,7 +1319,10 @@ impl ScavengerContract {
         Vec::new(&env)
     }
 
-    /// Get all transfers for a participant (as receiver)
+    /// Get all inbound transfers for a participant.
+    ///
+    /// > **Note:** Currently returns an empty list. A receiver index is required
+    /// > for efficient lookup and is not yet implemented.
     pub fn get_transfers_to(env: Env, _address: Address) -> Vec<(u64, Vec<WasteTransfer>)> {
         // Note: This is a simplified implementation
         // In production, you'd want to maintain an index for efficient queries
@@ -1016,7 +1331,11 @@ impl ScavengerContract {
         Vec::new(&env)
     }
 
-    /// Validate if a participant can perform a specific action
+    /// Check whether a participant is permitted to collect waste materials.
+    ///
+    /// # Returns
+    /// `true` if the participant is registered and their role allows collection
+    /// (`Recycler` or `Collector`).
     pub fn can_collect(env: Env, address: Address) -> bool {
         let key = (address,);
         if let Some(participant) = env.storage().instance().get::<_, Participant>(&key) {
@@ -1026,7 +1345,10 @@ impl ScavengerContract {
         }
     }
 
-    /// Validate if a participants can manufacture
+    /// Check whether a participant is permitted to manufacture products.
+    ///
+    /// # Returns
+    /// `true` if the participant is registered and their role is `Manufacturer`.
     pub fn can_manufacture(env: Env, address: Address) -> bool {
         let key = (address,);
         if let Some(participant) = env.storage().instance().get::<_, Participant>(&key) {
@@ -1036,7 +1358,22 @@ impl ScavengerContract {
         }
     }
 
-    /// Submit a new material for recycling
+    /// Submit a single waste material for recycling (v1 API).
+    ///
+    /// Creates a [`Material`] record, updates the submitter's recycling stats,
+    /// and increments the global weight counter.
+    ///
+    /// # Parameters
+    /// - `waste_type`: Category of the material (e.g. `Plastic`, `Metal`).
+    /// - `weight`: Weight in grams (must be > 0 for meaningful rewards).
+    /// - `submitter`: Registered participant submitting the material. Must sign.
+    /// - `description`: Free-text description of the material.
+    ///
+    /// # Returns
+    /// The newly created [`Material`] record with a unique `id`.
+    ///
+    /// # Errors
+    /// - Panics `"Caller is not a registered participant"` if `submitter` is not registered.
     pub fn submit_material(
         env: Env,
         waste_type: WasteType,
@@ -1045,6 +1382,7 @@ impl ScavengerContract {
         description: String,
     ) -> Material {
         // Validate submitter is registered
+        Self::require_not_paused(&env);
         Self::only_registered(&env, &submitter);
 
         // Get next waste ID using the new storage system
@@ -1084,7 +1422,24 @@ impl ScavengerContract {
         material
     }
 
-    /// Register new waste with location data
+    /// Register a new waste item with GPS location data (v2 API).
+    ///
+    /// Stores the waste in the v2 storage layout and appends its ID to the
+    /// recycler's waste list. Emits a `waste_registered` event.
+    ///
+    /// # Parameters
+    /// - `waste_type`: Category of the waste.
+    /// - `weight`: Weight in grams (must be > 0).
+    /// - `recycler`: Registered participant creating the record. Must sign.
+    /// - `latitude`: Collection latitude in microdegrees.
+    /// - `longitude`: Collection longitude in microdegrees.
+    ///
+    /// # Returns
+    /// The new waste ID (`u128`).
+    ///
+    /// # Errors
+    /// - Panics `"Waste weight must be greater than zero"`.
+    /// - Panics `"Caller is not a registered participant"`.
     pub fn recycle_waste(
         env: Env,
         waste_type: WasteType,
@@ -1138,12 +1493,18 @@ impl ScavengerContract {
         waste_id
     }
 
-    /// Get waste by ID (v2 API with location tracking)
+    /// Retrieve a v2 waste record by its `u128` ID.
+    ///
+    /// # Returns
+    /// `Some(Waste)` if found, `None` otherwise.
     pub fn get_waste_v2(env: Env, waste_id: u128) -> Option<types::Waste> {
         env.storage().instance().get(&("waste_v2", waste_id))
     }
 
-    /// Get all waste IDs owned by a participant (v2 API)
+    /// Get all v2 waste IDs currently owned by a participant.
+    ///
+    /// # Returns
+    /// `Vec<u128>` of waste IDs. Empty if the participant owns none.
     pub fn get_participant_wastes_v2(env: Env, participant: Address) -> Vec<u128> {
         env.storage()
             .instance()
@@ -1151,7 +1512,27 @@ impl ScavengerContract {
             .unwrap_or(Vec::new(&env))
     }
 
-    /// Transfer waste between participants with location tracking
+    /// Transfer a v2 waste item between participants with location tracking.
+    ///
+    /// Validates the role-based transfer route, updates ownership, adjusts both
+    /// participants' waste lists, appends to transfer history, and emits a
+    /// `transfer` event.
+    ///
+    /// # Parameters
+    /// - `waste_id`: ID of the v2 waste to transfer.
+    /// - `from`: Current owner. Must sign and own the waste.
+    /// - `to`: New owner. Must be registered.
+    /// - `latitude`: Transfer location latitude in microdegrees.
+    /// - `longitude`: Transfer location longitude in microdegrees.
+    ///
+    /// # Returns
+    /// The [`WasteTransfer`] record that was appended to history.
+    ///
+    /// # Errors
+    /// - Panics `"Waste item not found"`.
+    /// - Panics `"Cannot transfer deactivated waste"`.
+    /// - Panics `"Invalid transfer"` if the role transition is not permitted.
+    /// - Panics `"Caller is not the owner of this waste item"`.
     pub fn transfer_waste_v2(
         env: Env,
         waste_id: u128,
@@ -1238,7 +1619,25 @@ impl ScavengerContract {
         transfer
     }
 
-    /// Transfer aggregated waste from collector to manufacturer
+    /// Transfer aggregated waste from a collector directly to a manufacturer.
+    ///
+    /// Creates a new v2 waste record owned by `manufacturer`, records the
+    /// transfer, and emits a `bulk_xfr` event. Useful for bulk handoffs where
+    /// individual waste IDs are not tracked.
+    ///
+    /// # Parameters
+    /// - `waste_type`: Type of the aggregated waste.
+    /// - `collector`: Registered `Collector`. Must sign.
+    /// - `manufacturer`: Registered `Manufacturer` receiving the waste.
+    /// - `latitude` / `longitude`: Handoff location in microdegrees.
+    /// - `notes`: Short symbol note attached to the transfer record.
+    ///
+    /// # Returns
+    /// The new waste ID (`u128`).
+    ///
+    /// # Errors
+    /// - Panics `"Only collectors can use this"`.
+    /// - Panics `"Recipient must be manufacturer"`.
     pub fn transfer_collected_waste(
         env: Env,
         waste_type: WasteType,
@@ -1333,8 +1732,26 @@ impl ScavengerContract {
         waste_id
     }
 
-    /// Confirm waste details
+    /// Confirm receipt of a v2 waste item.
+    ///
+    /// A participant other than the current owner calls this to acknowledge
+    /// the waste. Emits a `waste_confirmed` event.
+    ///
+    /// # Parameters
+    /// - `waste_id`: ID of the v2 waste to confirm.
+    /// - `confirmer`: Registered participant confirming receipt. Must sign.
+    ///   Must **not** be the current owner.
+    ///
+    /// # Returns
+    /// The updated [`Waste`] with `is_confirmed = true`.
+    ///
+    /// # Errors
+    /// - Panics `"Waste not found"`.
+    /// - Panics `"Cannot confirm deactivated waste"`.
+    /// - Panics `"Owner cannot confirm own waste"`.
+    /// - Panics `"Waste already confirmed"`.
     pub fn confirm_waste_details(env: Env, waste_id: u128, confirmer: Address) -> types::Waste {
+        Self::require_not_paused(&env);
         confirmer.require_auth();
         Self::require_registered(&env, &confirmer);
 
@@ -1366,13 +1783,28 @@ impl ScavengerContract {
         waste
     }
 
-    /// Reset waste confirmation status
-    /// Only the waste owner can reset the confirmation
+    /// Reset the confirmation status of a v2 waste item.
+    ///
+    /// Only the current owner may reset confirmation, allowing the item to be
+    /// re-confirmed after a dispute or correction.
+    ///
+    /// # Parameters
+    /// - `waste_id`: ID of the v2 waste.
+    /// - `owner`: Current owner. Must sign.
+    ///
+    /// # Returns
+    /// The updated [`Waste`] with `is_confirmed = false`.
+    ///
+    /// # Errors
+    /// - Panics `"Waste item not found"`.
+    /// - Panics `"Waste is not confirmed"`.
+    /// - Panics `"Caller is not the owner of this waste item"`.
     pub fn reset_waste_confirmation(
         env: Env,
         waste_id: u128,
         owner: Address,
     ) -> types::Waste {
+        Self::require_not_paused(&env);
         // Access control check - verify caller owns the waste
         Self::only_waste_owner(&env, &owner, waste_id);
         Self::require_registered(&env, &owner);
@@ -1400,8 +1832,21 @@ impl ScavengerContract {
         waste
     }
 
-    /// Deactivate a waste record (admin only)
-    /// Deactivated waste cannot be queried or reactivated
+    /// Permanently deactivate a v2 waste record (admin only).
+    ///
+    /// Deactivated waste cannot be transferred or confirmed. The operation is
+    /// irreversible.
+    ///
+    /// # Parameters
+    /// - `waste_id`: ID of the v2 waste to deactivate.
+    /// - `admin`: Contract admin. Must sign.
+    ///
+    /// # Returns
+    /// The updated [`Waste`] with `is_active = false`.
+    ///
+    /// # Errors
+    /// - Panics `"Waste item not found"`.
+    /// - Panics `"Waste already deactivated"`.
     pub fn deactivate_waste(
         env: Env,
         waste_id: u128,
@@ -1432,8 +1877,21 @@ impl ScavengerContract {
         waste
     }
 
-    /// Batch submit multiple materials for recycling
-    /// More efficient than individual submissions
+    /// Submit multiple waste materials in a single transaction (v1 API).
+    ///
+    /// More gas-efficient than repeated [`submit_material`] calls because stats
+    /// and storage writes are batched. Emits no individual events per item.
+    ///
+    /// # Parameters
+    /// - `materials`: Vec of `(WasteType, weight_grams, description)` tuples.
+    /// - `submitter`: Registered participant. Must sign.
+    ///
+    /// # Returns
+    /// `Vec<Material>` in the same order as the input.
+    ///
+    /// # Errors
+    /// - Panics `"Caller is not a registered participant"`.
+    /// - Panics `"Overflow in batch weight"` on u64 overflow.
     pub fn submit_materials_batch(
         env: Env,
         materials: soroban_sdk::Vec<(WasteType, u64, String)>,
@@ -1489,25 +1947,36 @@ impl ScavengerContract {
         results
     }
 
-    /// Get material by ID (alias for backward compatibility)
+    /// Retrieve a v1 material record by ID. Alias for [`get_waste`].
     pub fn get_material(env: Env, material_id: u64) -> Option<Material> {
         Self::get_waste(env, material_id)
     }
 
     /// Get waste by ID (alias for backward compatibility)
+    ///
+    /// # Deprecated
+    /// Use [`get_waste`] instead. This function is an exact alias and will be
+    /// removed in a future release.
     pub fn get_waste_by_id(env: Env, waste_id: u64) -> Option<Material> {
         Self::get_waste(env, waste_id)
     }
 
-    /// Get waste by ID (primary public interface)
-    /// Returns the waste/material record if it exists, None otherwise
+    /// Retrieve a v1 waste/material record by ID.
+    ///
+    /// # Returns
+    /// `Some(Material)` if found, `None` otherwise.
     pub fn get_waste(env: Env, waste_id: u64) -> Option<Material> {
         let key = ("waste", waste_id);
         env.storage().instance().get(&key)
     }
 
-    /// Get all waste IDs owned by a participant
-    /// Returns a vector of waste IDs where the participant is the current submitter/owner
+    /// Get all v1 waste IDs currently owned by a participant.
+    ///
+    /// Performs a linear scan over all waste records. For large datasets,
+    /// prefer [`get_participant_wastes_v2`] which uses an indexed list.
+    ///
+    /// # Returns
+    /// `Vec<u64>` of waste IDs where `material.submitter == participant`.
     pub fn get_participant_wastes(env: Env, participant: Address) -> Vec<u64> {
         let mut waste_ids = Vec::new(&env);
         let waste_count = env
@@ -1529,7 +1998,14 @@ impl ScavengerContract {
         waste_ids
     }
 
-    /// Get multiple wastes by IDs (batch retrieval)
+    /// Retrieve multiple v1 waste records in a single call.
+    ///
+    /// # Parameters
+    /// - `waste_ids`: Vec of waste IDs to fetch.
+    ///
+    /// # Returns
+    /// `Vec<Option<Material>>` in the same order as `waste_ids`.
+    /// Each element is `None` if the corresponding ID does not exist.
     pub fn get_wastes_batch(
         env: Env,
         waste_ids: soroban_sdk::Vec<u64>,
@@ -1543,7 +2019,23 @@ impl ScavengerContract {
         results
     }
 
-    /// Verify a material submission (only recyclers can verify)
+    /// Verify a submitted material and distribute token rewards.
+    ///
+    /// Marks the material as verified, calculates reward points based on weight
+    /// and waste type, then distributes shares to collectors, the current owner,
+    /// and the recycler remainder via `_reward_tokens`.
+    ///
+    /// # Parameters
+    /// - `material_id`: ID of the v1 material to verify.
+    /// - `verifier`: Registered `Recycler`. Must sign.
+    ///
+    /// # Returns
+    /// The updated [`Material`] with `verified = true`.
+    ///
+    /// # Errors
+    /// - Panics `"Verifier not registered"` / `"Verifier is not registered"`.
+    /// - Panics `"Only recyclers can verify materials"`.
+    /// - Panics `"Material not found"`.
     pub fn verify_material(env: Env, material_id: u64, verifier: Address) -> Material {
         verifier.require_auth();
 
@@ -1591,7 +2083,20 @@ impl ScavengerContract {
         material
     }
 
-    /// Batch verify multiple materials
+    /// Verify multiple materials in a single transaction.
+    ///
+    /// Skips any IDs that do not exist. For each verified material, reward
+    /// tokens are distributed and a `tokens_rewarded` event is emitted.
+    ///
+    /// # Parameters
+    /// - `material_ids`: Vec of v1 material IDs to verify.
+    /// - `verifier`: Registered `Recycler`. Must sign.
+    ///
+    /// # Returns
+    /// `Vec<Material>` containing only the materials that were found and verified.
+    ///
+    /// # Errors
+    /// - Panics `"Verifier not registered"` / `"Only recyclers can verify materials"`.
     pub fn verify_materials_batch(
         env: Env,
         material_ids: soroban_sdk::Vec<u64>,
@@ -1647,13 +2152,22 @@ impl ScavengerContract {
         results
     }
 
-    /// Get recycling statistics for a participant
+    /// Get recycling statistics for a participant.
+    ///
+    /// # Returns
+    /// `Some(RecyclingStats)` if the participant has submitted or verified
+    /// at least one material, `None` otherwise.
     pub fn get_stats(env: Env, participant: Address) -> Option<RecyclingStats> {
         env.storage().instance().get(&("stats", participant))
     }
 
-    /// Get supply chain statistics (total wastes, total weight, total tokens earned)
-    /// Returns a tuple of (total_wastes_count, total_weight_grams, total_tokens_earned)
+    /// Get global supply-chain statistics.
+    ///
+    /// # Returns
+    /// A tuple `(total_waste_count, total_active_weight_grams, total_tokens_earned)`.
+    ///
+    /// > **Note:** `total_active_weight_grams` iterates all v2 waste records and
+    /// > may be expensive for large datasets.
     pub fn get_supply_chain_stats(env: Env) -> (u64, u64, u128) {
         let total_wastes = Self::get_waste_count(&env);
         let total_weight = Self::get_total_active_waste_weight(&env);
@@ -1668,8 +2182,15 @@ impl ScavengerContract {
         env.storage().instance().get(&key).unwrap_or(Vec::new(&env))
     }
 
-    /// Get the active incentive with the highest reward for a specific manufacturer and waste type
-    /// Returns None if no active incentive is found
+    /// Get the best (highest reward) active incentive for a manufacturer and waste type.
+    ///
+    /// # Parameters
+    /// - `manufacturer`: Address of the manufacturer whose incentives to search.
+    /// - `waste_type`: The [`WasteType`] to match.
+    ///
+    /// # Returns
+    /// `Some(Incentive)` with the highest `reward_points`, or `None` if no
+    /// active matching incentive exists.
     pub fn get_active_mfr_incentive(
         env: Env,
         manufacturer: Address,
@@ -1699,7 +2220,28 @@ impl ScavengerContract {
         best_incentive
     }
 
-    /// Create a new incentive
+    /// Create a new manufacturer incentive program for a specific waste type.
+    ///
+    /// Only registered `Manufacturer` participants may create incentives.
+    /// The incentive is indexed both by rewarder and by waste type for efficient lookup.
+    ///
+    /// # Parameters
+    /// - `rewarder`: Manufacturer creating the incentive. Must sign.
+    /// - `waste_type`: The [`WasteType`] this incentive applies to.
+    /// - `reward_points`: Tokens awarded per kg of qualifying waste.
+    /// - `total_budget`: Maximum total tokens this incentive can distribute.
+    ///
+    /// # Returns
+    /// The newly created [`Incentive`] with `active = true`.
+    ///
+    /// # Errors
+    /// - Panics `"Caller is not a manufacturer"`.
+    ///
+    /// # Example
+    /// ```text
+    /// create_incentive(manufacturer, WasteType::Plastic, 50, 10_000)
+    /// // 50 tokens per kg, up to 10 000 tokens total
+    /// ```
     pub fn create_incentive(
         env: Env,
         rewarder: Address,
@@ -1708,6 +2250,7 @@ impl ScavengerContract {
         total_budget: u64,
     ) -> Incentive {
         // Access control check
+        Self::require_not_paused(&env);
         Self::only_manufacturer(&env, &rewarder);
 
         // Get next incentive ID
@@ -1743,8 +2286,25 @@ impl ScavengerContract {
         incentive
     }
 
-    /// Claim reward points from an incentive for a verified material.
-    /// Keeps backward compatibility with older tests.
+    /// Claim reward tokens from an incentive for a verified material.
+    ///
+    /// Deducts the reward from `incentive.remaining_budget` and credits it to
+    /// `claimer.total_tokens_earned`. Automatically deactivates the incentive
+    /// if the budget reaches zero.
+    ///
+    /// # Parameters
+    /// - `incentive_id`: ID of the incentive to claim from.
+    /// - `material_id`: ID of the verified v1 material being claimed for.
+    /// - `claimer`: Registered participant claiming the reward. Must sign.
+    ///
+    /// # Returns
+    /// The reward amount as `i128`.
+    ///
+    /// # Errors
+    /// - Panics `"Incentive not found"` / `"Incentive is not active"`.
+    /// - Panics `"Material not found"` / `"Material not verified"`.
+    /// - Panics `"Waste type mismatch"`.
+    /// - Panics `"No reward available"` if calculated reward is zero.
     pub fn claim_incentive_reward(
         env: Env,
         incentive_id: u64,
@@ -1783,8 +2343,22 @@ impl ScavengerContract {
         reward as i128
     }
 
-    /// Deactivate an incentive (only by creator)
+    /// Deactivate an incentive permanently.
+    ///
+    /// Only the original creator (`rewarder`) may deactivate their incentive.
+    ///
+    /// # Parameters
+    /// - `incentive_id`: ID of the incentive to deactivate.
+    /// - `rewarder`: Original creator. Must sign and be registered.
+    ///
+    /// # Returns
+    /// The updated [`Incentive`] with `active = false`.
+    ///
+    /// # Errors
+    /// - Panics `"Incentive not found"`.
+    /// - Panics `"Only incentive creator can deactivate"`.
     pub fn deactivate_incentive(env: Env, incentive_id: u64, rewarder: Address) -> Incentive {
+        Self::require_not_paused(&env);
         rewarder.require_auth();
         Self::require_registered(&env, &rewarder);
 
@@ -1800,5 +2374,137 @@ impl ScavengerContract {
         Self::set_incentive(&env, incentive_id, &incentive);
 
         incentive
+    }
+
+    // ========== Global Metrics ==========
+
+    /// Get global contract metrics (total waste count and total tokens earned)
+    pub fn get_metrics(env: Env) -> types::GlobalMetrics {
+        let total_wastes_count: u64 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("MAT_CNT"))
+            .unwrap_or(0);
+        let total_tokens_earned: u128 = env
+            .storage()
+            .instance()
+            .get(&TOTAL_TOKENS)
+            .unwrap_or(0);
+        types::GlobalMetrics {
+            total_wastes_count,
+            total_tokens_earned,
+        }
+    }
+
+    // ========== Admin Transfer ==========
+
+    /// Transfer admin rights to a new address (current admin only)
+    pub fn transfer_admin(env: Env, current_admin: Address, new_admin: Address) {
+        Self::require_admin(&env, &current_admin);
+        env.storage().instance().set(&ADMIN, &new_admin);
+    }
+
+    /// Pause the contract (admin only) — blocks all state-changing functions
+    pub fn pause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        assert!(!env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is already paused");
+        env.storage().instance().set(&PAUSED, &true);
+        events::emit_contract_paused(&env, &admin);
+    }
+
+    /// Unpause the contract (admin only)
+    pub fn unpause(env: Env, admin: Address) {
+        Self::require_admin(&env, &admin);
+        assert!(env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is not paused");
+        env.storage().instance().set(&PAUSED, &false);
+        events::emit_contract_unpaused(&env, &admin);
+    }
+
+    /// Get current pause state
+    pub fn is_paused(env: Env) -> bool {
+        env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false)
+    }
+
+    fn require_not_paused(env: &Env) {
+        assert!(!env.storage().instance().get::<_, bool>(&PAUSED).unwrap_or(false), "Contract is paused");
+    }
+
+    // ========== Incentive-Based Reward Distribution ==========
+
+    /// Distribute rewards through the supply chain for a confirmed material using an incentive.
+    /// Rewards collectors in the transfer history, the original submitter, and the current owner.
+    /// Returns the total reward distributed.
+    pub fn distribute_rewards(
+        env: Env,
+        waste_id: u64,
+        incentive_id: u64,
+        manufacturer: Address,
+    ) -> i128 {
+        manufacturer.require_auth();
+
+        let material = Self::get_waste_internal(&env, waste_id).expect("Material not found");
+        assert!(material.verified, "Material must be confirmed");
+
+        Self::require_not_paused(&env);
+        let mut incentive =
+            Self::get_incentive_internal(&env, incentive_id).expect("Incentive not found");
+        assert!(incentive.rewarder == manufacturer, "Only incentive creator can distribute rewards");
+        assert!(incentive.waste_type == material.waste_type, "Waste type mismatch");
+        assert!(incentive.active, "Incentive not active");
+
+        let weight_kg = material.weight / 1000;
+        let total_reward = (incentive.reward_points as i128) * (weight_kg as i128);
+        assert!(
+            (total_reward as u64) <= incentive.remaining_budget,
+            "Insufficient incentive budget"
+        );
+
+        let transfers = Self::get_transfer_history(env.clone(), waste_id);
+        let collector_pct: u32 = env.storage().instance().get(&COLLECTOR_PCT).unwrap_or(5);
+        let owner_pct: u32 = env.storage().instance().get(&OWNER_PCT).unwrap_or(50);
+
+        let token_address: Address = env
+            .storage()
+            .instance()
+            .get(&TOKEN_ADDR)
+            .expect("Token address not set");
+        let token_client = token::Client::new(&env, &token_address);
+
+        let collector_share = (total_reward * (collector_pct as i128)) / 100;
+        let owner_share = (total_reward * (owner_pct as i128)) / 100;
+        let mut total_distributed: i128 = 0;
+
+        for transfer in transfers.iter() {
+            let key = (transfer.to.clone(),);
+            if let Some(p) = env.storage().instance().get::<_, Participant>(&key) {
+                if p.role.can_collect_materials() && !p.role.can_manufacture() {
+                    token_client.transfer(&manufacturer, &transfer.to, &collector_share);
+                    Self::update_participant_stats(&env, &transfer.to, 0, collector_share as u64);
+                    events::emit_tokens_rewarded(&env, &transfer.to, collector_share as u128, waste_id);
+                    total_distributed += collector_share;
+                }
+            }
+        }
+
+        token_client.transfer(&manufacturer, &material.submitter, &owner_share);
+        Self::update_participant_stats(&env, &material.submitter, 0, owner_share as u64);
+        events::emit_tokens_rewarded(&env, &material.submitter, owner_share as u128, waste_id);
+        total_distributed += owner_share;
+
+        let recycler_amount = total_reward - total_distributed;
+        if recycler_amount > 0 {
+            token_client.transfer(&manufacturer, &material.submitter, &recycler_amount);
+            Self::update_participant_stats(&env, &material.submitter, 0, recycler_amount as u64);
+            events::emit_tokens_rewarded(&env, &material.submitter, recycler_amount as u128, waste_id);
+        }
+
+        incentive.remaining_budget = incentive.remaining_budget.saturating_sub(total_reward as u64);
+        if incentive.remaining_budget == 0 {
+            incentive.active = false;
+        }
+        Self::set_incentive(&env, incentive_id, &incentive);
+        Self::add_to_total_tokens(&env, total_reward as u128);
+
+        total_reward
     }
 }
