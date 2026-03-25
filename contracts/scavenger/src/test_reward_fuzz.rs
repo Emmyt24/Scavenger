@@ -1,5 +1,5 @@
 #![cfg(test)]
-
+// fuzz tests for reward distribution math
 use proptest::prelude::*;
 
 /// Pure reward-distribution math extracted from `distribute_rewards`.
