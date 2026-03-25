@@ -961,6 +961,16 @@ impl ScavengerContract {
     }
 
     /// Transfer waste ownership from one participants to another
+    /// Transfer waste ownership (v1 — u64 waste IDs, String note).
+    ///
+    /// # Deprecated
+    /// Use [`transfer_waste_v2`] instead. v2 uses u128 waste IDs, records
+    /// GPS coordinates, validates transfer routes, and maintains the
+    /// `participant_wastes` index. This function is kept for backward
+    /// compatibility and will be removed in a future release.
+    ///
+    /// Migration: replace `transfer_waste(id, from, to, note)` with
+    /// `transfer_waste_v2(id as u128, from, to, latitude, longitude)`.
     pub fn transfer_waste(
         env: Env,
         waste_id: u64,
@@ -970,28 +980,29 @@ impl ScavengerContract {
     ) -> Material {
         from.require_auth();
 
-        // Verify both participants are registered
-        if !Self::is_participant_registered(env.clone(), from.clone()) {
-            panic!("Sender not registered");
-        }
-        if !Self::is_participant_registered(env.clone(), to.clone()) {
-            panic!("Receiver not registered");
-        }
+        Self::require_registered(&env, &from);
+        Self::require_registered(&env, &to);
 
-        // Get and update material
         let mut material: Material =
             Self::get_waste_internal(&env, waste_id).expect("Waste not found");
 
-        // Verify sender owns the waste
         if material.submitter != from {
             panic!("Only waste owner can transfer");
         }
 
-        // Update ownership
+        // Align with v2: reject transfers on deactivated waste
+        if !material.is_active {
+            panic!("Cannot transfer deactivated waste");
+        }
+
+        // Align with v2: enforce valid transfer routes
+        if !Self::is_valid_transfer(env.clone(), from.clone(), to.clone()) {
+            panic!("Invalid transfer: role combination not allowed");
+        }
+
         material.submitter = to.clone();
         Self::set_waste(&env, waste_id, &material);
 
-        // Record transfer in history
         events::emit_waste_transferred(&env, waste_id, &from, &to);
         Self::record_transfer(&env, waste_id, from, to, note);
 
