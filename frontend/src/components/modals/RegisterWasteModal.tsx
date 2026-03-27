@@ -15,16 +15,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/Select'
-import { ScavengerClient } from '@/api/client'
-import { WasteType, Material } from '@/api/types'
-import { config } from '@/config'
-import { networkConfig } from '@/lib/stellar'
-
-const client = new ScavengerClient({
-  rpcUrl: networkConfig.rpcUrl,
-  networkPassphrase: networkConfig.networkPassphrase,
-  contractId: config.contractId,
-})
+import { WasteType } from '@/api/types'
+import { useRecycleWaste } from '@/hooks/useRecycleWaste'
 
 const WASTE_TYPES = [
   { value: WasteType.Paper, label: 'Paper' },
@@ -38,36 +30,50 @@ interface Props {
   open: boolean
   address: string
   onClose: () => void
-  onSuccess: (material: Material) => void
+  onSuccess?: (wasteId: bigint) => void
 }
 
 export function RegisterWasteModal({ open, address, onClose, onSuccess }: Props) {
   const [wasteType, setWasteType] = useState<WasteType>(WasteType.Paper)
   const [weight, setWeight] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [latitude, setLatitude] = useState('')
+  const [longitude, setLongitude] = useState('')
 
-  async function handleSubmit(e: React.FormEvent) {
+  const { mutate: recycleWaste, isPending } = useRecycleWaste()
+
+  function handleClose() {
+    if (isPending) return
+    setWeight('')
+    setLatitude('')
+    setLongitude('')
+    setWasteType(WasteType.Paper)
+    onClose()
+  }
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     const w = parseFloat(weight)
     if (!w || w <= 0) return
-    setError(null)
-    setSubmitting(true)
-    try {
-      const material = await client.submitMaterial(address, wasteType, BigInt(Math.round(w)), address)
-      onSuccess(material)
-      setWeight('')
-      setWasteType(WasteType.Paper)
-      onClose()
-    } catch (err: any) {
-      setError(err?.message ?? 'Submission failed.')
-    } finally {
-      setSubmitting(false)
-    }
+
+    // Convert kg → grams for the contract
+    const weightGrams = BigInt(Math.round(w * 1000))
+    // Convert decimal degrees → microdegrees (contract expects i128 microdegrees)
+    const lat = BigInt(Math.round(parseFloat(latitude || '0') * 1_000_000))
+    const lng = BigInt(Math.round(parseFloat(longitude || '0') * 1_000_000))
+
+    recycleWaste(
+      { recycler: address, wasteType, weightGrams, latitude: lat, longitude: lng },
+      {
+        onSuccess: (wasteId) => {
+          onSuccess?.(wasteId)
+          handleClose()
+        },
+      }
+    )
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Register Waste</DialogTitle>
@@ -96,8 +102,8 @@ export function RegisterWasteModal({ open, address, onClose, onSuccess }: Props)
             <label className="text-sm font-medium">Weight (kg)</label>
             <Input
               type="number"
-              min="0.01"
-              step="0.01"
+              min="0.001"
+              step="0.001"
               placeholder="e.g. 2.5"
               value={weight}
               onChange={(e) => setWeight(e.target.value)}
@@ -105,14 +111,39 @@ export function RegisterWasteModal({ open, address, onClose, onSuccess }: Props)
             />
           </div>
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Latitude</label>
+              <Input
+                type="number"
+                min="-90"
+                max="90"
+                step="0.000001"
+                placeholder="e.g. 40.714"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-sm font-medium">Longitude</label>
+              <Input
+                type="number"
+                min="-180"
+                max="180"
+                step="0.000001"
+                placeholder="e.g. -74.006"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value)}
+              />
+            </div>
+          </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={onClose} disabled={submitting}>
+            <Button type="button" variant="outline" onClick={handleClose} disabled={isPending}>
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !weight}>
-              {submitting ? 'Submitting…' : 'Submit'}
+            <Button type="submit" disabled={isPending || !weight}>
+              {isPending ? 'Submitting…' : 'Submit'}
             </Button>
           </DialogFooter>
         </form>

@@ -184,7 +184,7 @@ export function RecyclerDashboard() {
         open={modalOpen}
         address={address}
         onClose={() => setModalOpen(false)}
-        onSuccess={() => load()}
+        onSuccess={() => { setModalOpen(false); load() }}
       />
     </div>
   )

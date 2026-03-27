@@ -415,12 +415,31 @@ export class ScavengerClient {
     return this.invoke<[bigint, bigint, bigint]>('get_supply_chain_stats', [])
   }
 
-  async getParticipantWastes(address: string): Promise<number[]> {
-    return this.invoke<number[]>('get_participant_wastes', [new Address(address).toScVal()])
-  }
-
   async getActiveIncentives(): Promise<Incentive[]> {
     return this.invoke<Incentive[]>('get_active_incentives', [])
+  }
+
+  async recycleWaste(
+    recycler: string,
+    wasteType: WasteType,
+    weight: bigint,
+    latitude: bigint,
+    longitude: bigint,
+    signer: string
+  ): Promise<bigint> {
+    return this.invoke<bigint>(
+      'recycle_waste',
+      [
+        nativeToScVal(wasteType),
+        nativeToScVal(weight, { type: 'u128' }),
+        new Address(recycler).toScVal(),
+        nativeToScVal(latitude, { type: 'i128' }),
+        nativeToScVal(longitude, { type: 'i128' }),
+      ],
+      signer
+    )
+  }
+
   async getParticipantWastesV2(address: string): Promise<bigint[]> {
     return this.invoke<bigint[]>('get_participant_wastes_v2', [new Address(address).toScVal()])
   }
