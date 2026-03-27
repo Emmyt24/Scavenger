@@ -3,6 +3,8 @@ import { Plus, Coins, Recycle, Weight } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { StatCardSkeleton } from '@/components/ui/Skeletons'
+import { AddressDisplay } from '@/components/ui/AddressDisplay'
 import { RegisterWasteModal } from '@/components/modals/RegisterWasteModal'
 import { useAuth } from '@/context/AuthContext'
 import { useAppTitle } from '@/hooks/useAppTitle'
@@ -85,41 +87,41 @@ export function RecyclerDashboard() {
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Token Balance</CardTitle>
-            <Coins className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {loading ? '—' : stats?.total_earned?.toString() ?? '0'}
-            </p>
-          </CardContent>
-        </Card>
+        {loading ? (
+          Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Token Balance</CardTitle>
+                <Coins className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{stats?.total_earned?.toString() ?? '0'}</p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Wastes Submitted</CardTitle>
-            <Recycle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {loading ? '—' : stats?.materials_submitted ?? 0}
-            </p>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Wastes Submitted</CardTitle>
+                <Recycle className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{stats?.materials_submitted ?? 0}</p>
+              </CardContent>
+            </Card>
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Transfers</CardTitle>
-            <Weight className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <p className="text-2xl font-bold">
-              {loading ? '—' : stats?.transfers_count ?? 0}
-            </p>
-          </CardContent>
-        </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between pb-2">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Transfers</CardTitle>
+                <Weight className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <p className="text-2xl font-bold">{stats?.transfers_count ?? 0}</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Recent wastes */}
@@ -129,7 +131,17 @@ export function RecyclerDashboard() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="divide-y">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between py-3">
+                  <div className="space-y-1.5">
+                    <div className="h-4 w-32 animate-pulse rounded bg-muted" />
+                    <div className="h-3 w-16 animate-pulse rounded bg-muted" />
+                  </div>
+                  <div className="h-5 w-16 animate-pulse rounded-full bg-muted" />
+                </div>
+              ))}
+            </div>
           ) : wastes.length === 0 ? (
             <p className="text-sm text-muted-foreground">No wastes submitted yet.</p>
           ) : (
@@ -157,7 +169,17 @@ export function RecyclerDashboard() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <div className="divide-y">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="flex items-center justify-between py-3">
+                  <div className="space-y-1.5">
+                    <div className="h-4 w-20 animate-pulse rounded bg-muted" />
+                    <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+                  </div>
+                  <div className="h-4 w-14 animate-pulse rounded bg-muted" />
+                </div>
+              ))}
+            </div>
           ) : incentives.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active incentives.</p>
           ) : (

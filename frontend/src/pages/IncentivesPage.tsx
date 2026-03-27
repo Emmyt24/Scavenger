@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { Input } from '@/components/ui/Input'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/Card'
+import { IncentiveCardSkeleton } from '@/components/ui/Skeletons'
+import { AddressDisplay } from '@/components/ui/AddressDisplay'
 import {
   Select,
   SelectContent,
@@ -116,8 +118,21 @@ export function IncentivesPage() {
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="space-y-6">
+          {Array.from({ length: 2 }).map((_, i) => (
+            <Card key={i}>
+              <CardHeader className="pb-3">
+                <div className="h-4 w-24 animate-pulse rounded bg-muted" />
+              </CardHeader>
+              <CardContent>
+                <table className="w-full text-sm">
+                  <tbody className="divide-y">
+                    {Array.from({ length: 3 }).map((_, j) => <IncentiveCardSkeleton key={j} />)}
+                  </tbody>
+                </table>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       ) : (
         <div className="space-y-6">
@@ -148,7 +163,7 @@ export function IncentivesPage() {
                             <tr key={inc.id} className="hover:bg-muted/30 transition-colors">
                               <td className="py-2 pr-4 font-mono">#{inc.id}</td>
                               <td className="py-2 pr-4 font-mono text-xs text-muted-foreground">
-                                {inc.rewarder.slice(0, 6)}…{inc.rewarder.slice(-4)}
+                                <AddressDisplay address={inc.rewarder} showExplorer />
                               </td>
                               <td className="py-2 pr-4">{inc.reward_points}</td>
                               <td className="py-2 pr-4">

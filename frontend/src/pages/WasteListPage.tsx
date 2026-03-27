@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import { Loader2, Search, Eye, ArrowRightLeft, CheckCircle } from 'lucide-react'
+import { Search, Eye, ArrowRightLeft, CheckCircle, Loader2 } from 'lucide-react'
 import { useWasteList } from '@/hooks/useWasteList'
 import { Material, WasteType } from '@/api/types'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 import { Badge } from '@/components/ui/Badge'
+import { WasteCardSkeleton } from '@/components/ui/Skeletons'
+import { AddressDisplay } from '@/components/ui/AddressDisplay'
 import {
   Select,
   SelectContent,
@@ -139,8 +141,22 @@ export function WasteListPage() {
       )}
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-16">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-muted-foreground">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium">ID</th>
+                <th className="px-4 py-3 text-left font-medium">Type</th>
+                <th className="px-4 py-3 text-left font-medium">Weight (kg)</th>
+                <th className="px-4 py-3 text-left font-medium">Status</th>
+                <th className="px-4 py-3 text-left font-medium">Submitted</th>
+                <th className="px-4 py-3 text-right font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {Array.from({ length: 5 }).map((_, i) => <WasteCardSkeleton key={i} />)}
+            </tbody>
+          </table>
         </div>
       ) : (
         <>
@@ -256,13 +272,13 @@ export function WasteListPage() {
               <dt className="text-muted-foreground">Verified</dt>
               <dd>{detailWaste.verified ? 'Yes' : 'No'}</dd>
               <dt className="text-muted-foreground">Submitter</dt>
-              <dd className="truncate font-mono text-xs">{detailWaste.submitter}</dd>
+              <dd><AddressDisplay address={detailWaste.submitter} showExplorer /></dd>
               <dt className="text-muted-foreground">Current Owner</dt>
-              <dd className="truncate font-mono text-xs">{detailWaste.current_owner}</dd>
+              <dd><AddressDisplay address={detailWaste.current_owner} showExplorer /></dd>
               {detailWaste.is_confirmed && (
                 <>
                   <dt className="text-muted-foreground">Confirmer</dt>
-                  <dd className="truncate font-mono text-xs">{detailWaste.confirmer}</dd>
+                  <dd><AddressDisplay address={detailWaste.confirmer} showExplorer /></dd>
                 </>
               )}
               <dt className="text-muted-foreground">Submitted</dt>
