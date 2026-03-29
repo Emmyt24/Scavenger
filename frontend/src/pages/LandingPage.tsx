@@ -2,7 +2,7 @@ import { Link } from 'react-router-dom'
 import { Recycle, Truck, Factory } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
-import { useSupplyChainStats } from '@/hooks/useSupplyChainStats'
+import { useStats } from '@/hooks/useStats'
 import { useAppTitle } from '@/hooks/useAppTitle'
 
 const STEPS = [
@@ -30,7 +30,7 @@ const FOOTER_LINKS = [
 
 export function LandingPage() {
   useAppTitle('Scavngr — Decentralized Recycling')
-  const { totalWastes, totalWeight, totalTokens, isLoading } = useSupplyChainStats()
+  const { totalWastes, totalWeight, totalTokens, isLoading } = useStats()
 
   return (
     <div className="flex min-h-screen flex-col bg-background text-foreground">
