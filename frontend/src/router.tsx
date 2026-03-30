@@ -10,15 +10,39 @@ import { LoginPage } from '@/pages/LoginPage'
 import { NotFoundPage } from '@/pages/NotFoundPage'
 
 // Lazy-load all protected pages to reduce initial bundle size
-const HomePage                  = lazy(() => import('@/pages/HomePage').then((m) => ({ default: m.HomePage })))
-const RecyclerDashboard         = lazy(() => import('@/pages/RecyclerDashboard').then((m) => ({ default: m.RecyclerDashboard })))
-const IncentivesPage            = lazy(() => import('@/pages/IncentivesPage').then((m) => ({ default: m.IncentivesPage })))
-const WasteListPage             = lazy(() => import('@/pages/WasteListPage').then((m) => ({ default: m.WasteListPage })))
-const ManufacturerDashboardPage = lazy(() => import('@/pages/ManufacturerDashboardPage').then((m) => ({ default: m.ManufacturerDashboardPage })))
-const CollectorDashboardPage    = lazy(() => import('@/pages/CollectorDashboardPage').then((m) => ({ default: m.CollectorDashboardPage })))
-const SettingsPage              = lazy(() => import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage })))
-const RewardsPage               = lazy(() => import('@/pages/RewardsPage').then((m) => ({ default: m.RewardsPage })))
-const SupplyChainTrackerPage    = lazy(() => import('@/pages/SupplyChainTrackerPage').then((m) => ({ default: m.SupplyChainTrackerPage })))
+const HomePage = lazy(() => import('@/pages/HomePage').then((m) => ({ default: m.HomePage })))
+const RecyclerDashboard = lazy(() =>
+  import('@/pages/RecyclerDashboard').then((m) => ({ default: m.RecyclerDashboard }))
+)
+const IncentivesPage = lazy(() =>
+  import('@/pages/IncentivesPage').then((m) => ({ default: m.IncentivesPage }))
+)
+const WasteListPage = lazy(() =>
+  import('@/pages/WasteListPage').then((m) => ({ default: m.WasteListPage }))
+)
+const ManufacturerDashboardPage = lazy(() =>
+  import('@/pages/ManufacturerDashboardPage').then((m) => ({
+    default: m.ManufacturerDashboardPage
+  }))
+)
+const CollectorDashboardPage = lazy(() =>
+  import('@/pages/CollectorDashboardPage').then((m) => ({ default: m.CollectorDashboardPage }))
+)
+const SettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+)
+const RewardsPage = lazy(() =>
+  import('@/pages/RewardsPage').then((m) => ({ default: m.RewardsPage }))
+)
+const SupplyChainTrackerPage = lazy(() =>
+  import('@/pages/SupplyChainTrackerPage').then((m) => ({ default: m.SupplyChainTrackerPage }))
+)
+const CommunityPage = lazy(() =>
+  import('@/pages/CommunityPage').then((m) => ({ default: m.CommunityPage }))
+)
+const AnalyticsPage = lazy(() =>
+  import('@/pages/AnalyticsPage').then((m) => ({ default: m.AnalyticsPage }))
+)
 
 // eslint-disable-next-line react-refresh/only-export-components
 function PageFallback() {
@@ -60,7 +84,9 @@ export const router = createBrowserRouter([
       { path: 'settings', element: <SettingsPage /> },
       { path: 'rewards', element: <RewardsPage /> },
       { path: 'tracker', element: <SupplyChainTrackerPage /> },
-    ],
+      { path: 'community', element: <CommunityPage /> },
+      { path: 'analytics', element: <AnalyticsPage /> }
+    ]
   },
-  { path: '*', element: <NotFoundPage /> },
+  { path: '*', element: <NotFoundPage /> }
 ])
